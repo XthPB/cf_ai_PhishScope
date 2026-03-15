@@ -1,4 +1,4 @@
-# cf_ai_signalboard
+# cf_ai_phishscope
 
 PhishScope is an original AI-powered phishing investigation workstation built on Cloudflare. It captures suspicious pages with Browser Rendering, scores them with Workers AI, and stores each investigation in a Durable Object so the analyst can keep asking follow-up questions inside the same case.
 
