@@ -58,15 +58,6 @@ Install dependencies:
 npm install
 ```
 
-Create a `.dev.vars` file:
-
-```bash
-cat <<'EOF' > .dev.vars
-MOCK_AI=true
-MOCK_BROWSER=true
-EOF
-```
-
 Start the app:
 
 ```bash
@@ -74,6 +65,8 @@ npm run dev
 ```
 
 Open [http://localhost:8787](http://localhost:8787).
+
+This local path uses the tracked [`wrangler.local.jsonc`](./wrangler.local.jsonc) config, so it works without Cloudflare authentication.
 
 Mock mode still demonstrates:
 
@@ -98,7 +91,13 @@ If needed:
 npx wrangler login
 ```
 
-Use remote dev for the live path:
+Before the first live preview or deploy on a new Cloudflare account, open the Workers dashboard once to create the required `workers.dev` subdomain:
+
+```text
+https://dash.cloudflare.com/<your-account-id>/workers/onboarding
+```
+
+Then use remote dev for the live path:
 
 ```bash
 npm run dev:remote

@@ -4,10 +4,11 @@
 	"private": true,
 	"scripts": {
 		"check": "npm run typecheck && npm run test",
+		"dev:mock": "wrangler dev --config wrangler.local.jsonc",
 		"dev:remote": "wrangler dev --remote",
 		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
+		"dev": "wrangler dev --config wrangler.local.jsonc",
+		"start": "wrangler dev --config wrangler.local.jsonc",
 		"test": "vitest",
 		"typecheck": "tsc --noEmit",
 		"cf-typegen": "wrangler types"
