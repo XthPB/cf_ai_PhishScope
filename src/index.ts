@@ -539,16 +539,29 @@ async function captureEvidence(env: AppEnv, targetUrl: string): Promise<RenderEv
 }
 
 function createFallbackAssessment(evidence: RenderEvidence, analystNote: string): InvestigationAssessment {
-	const suspiciousSignals = [...evidence.structuralSignals];
+	const suspiciousSignals = evidence.structuralSignals.filter(
+		(signal) => !/no dominant structural phishing indicator/i.test(signal),
+	);
 	const benignSignals: string[] = [];
-	let riskScore = 18;
+	let riskScore = 14;
+	const hasPasswordForm = evidence.forms.some((form) => form.hasPassword);
+	const hasCredentialLikeInputs = evidence.forms.some(
+		(form) => form.hasPassword || form.inputTypes.some((type) => /(email|password|tel|number)/i.test(type)),
+	);
+	const textCorpus = `${evidence.pageTitle} ${evidence.textExcerpt}`;
+	const urlCorpus = `${evidence.requestedUrl} ${evidence.finalUrl}`;
+	const credentialLanguageDetected = /(verify|password|account|secure|wallet|sign[\s-]?in|otp|mfa|login|reset|billing|unlock)/i.test(
+		`${urlCorpus} ${textCorpus}`,
+	);
+	const platformHosted = isLikelyThirdPartyPlatformHost(evidence.hostname);
+	const impersonatedBrand = inferBrandFromEvidence(evidence);
 
-	if (evidence.forms.some((form) => form.hasPassword)) {
+	if (hasPasswordForm) {
 		riskScore += 34;
 		suspiciousSignals.push('The rendered page contains a password field.');
 	}
 
-	if (evidence.finalUrl.startsWith('http://') && evidence.forms.some((form) => form.hasPassword)) {
+	if (evidence.finalUrl.startsWith('http://') && hasPasswordForm) {
 		riskScore += 16;
 		suspiciousSignals.push('A credential form appears on a non-TLS page.');
 	}
@@ -568,9 +581,38 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 		suspiciousSignals.push('The destination hostname is an IP literal.');
 	}
 
-	if (/(verify|password|account|secure|wallet|sign in|otp|mfa)/i.test(`${evidence.pageTitle} ${evidence.textExcerpt}`)) {
+	if (credentialLanguageDetected) {
 		riskScore += 15;
 		suspiciousSignals.push('The rendered text contains account-verification or credential language.');
+	}
+
+	if (/(verify|secure|login|signin|auth|reset|mfa|otp|wallet|invoice|billing|unlock)/i.test(urlCorpus)) {
+		riskScore += 12;
+		suspiciousSignals.push('The URL path or hostname contains credential- or urgency-oriented keywords.');
+	}
+
+	if (hasCredentialLikeInputs && credentialLanguageDetected && !hasPasswordForm) {
+		riskScore += 10;
+		suspiciousSignals.push('The page combines credential-oriented copy with interactive input fields.');
+	}
+
+	if (
+		impersonatedBrand !== 'Unknown' &&
+		!hostMatchesVisibleBrand(evidence.hostname, impersonatedBrand) &&
+		(hasPasswordForm || credentialLanguageDetected)
+	) {
+		riskScore += 22;
+		suspiciousSignals.push(
+			`Visible brand cues reference ${impersonatedBrand}, but the destination host does not match an expected ${impersonatedBrand} domain.`,
+		);
+	}
+
+	const externalLinkHosts = new Set(
+		evidence.topLinks.map((link) => link.hostname).filter((hostname) => hostname && hostname !== evidence.hostname),
+	);
+	if (externalLinkHosts.size >= 6) {
+		riskScore += 8;
+		suspiciousSignals.push('The rendered page sends users to many external destinations.');
 	}
 
 	if (/(cloudflare\.com|example\.com)$/.test(evidence.hostname)) {
@@ -578,12 +620,25 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 		benignSignals.push('The hostname resembles a known benign domain in mock or demo usage.');
 	}
 
-	if (!evidence.forms.some((form) => form.hasPassword)) {
+	if (!hasPasswordForm) {
 		benignSignals.push('No password collection form was found in the rendered page.');
 	}
 
-	if (evidence.topLinks.length <= 2) {
-		benignSignals.push('The page exposes a limited number of visible links.');
+	if (!credentialLanguageDetected) {
+		benignSignals.push('The rendered copy does not use urgent account-verification or credential-reset language.');
+	}
+
+	if (evidence.topLinks.length >= 4) {
+		benignSignals.push('The page exposes multiple ordinary navigation links, which is less common on disposable phishing pages.');
+	}
+
+	if (platformHosted && !hasPasswordForm && !credentialLanguageDetected) {
+		benignSignals.push('The page appears to be hosted on a common third-party platform rather than a direct credential collection host.');
+	}
+
+	if (impersonatedBrand !== 'Unknown' && hostMatchesVisibleBrand(evidence.hostname, impersonatedBrand)) {
+		riskScore -= 10;
+		benignSignals.push('The destination hostname aligns with the visible brand cues on the page.');
 	}
 
 	if (analystNote && /(urgent|invoice|crypto|suspend|mfa|otp|payroll)/i.test(analystNote)) {
@@ -592,9 +647,9 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 	}
 
 	riskScore = Math.max(0, Math.min(100, riskScore));
-	const verdict = riskScore >= 80 ? 'malicious' : riskScore >= 55 ? 'suspicious' : riskScore >= 30 ? 'inconclusive' : 'benign';
-	const confidence = riskScore >= 80 ? 'high' : riskScore >= 55 ? 'medium' : 'low';
-	const impersonatedBrand = inferBrandFromEvidence(evidence);
+	const verdict = riskScore >= 78 ? 'malicious' : riskScore >= 52 ? 'suspicious' : riskScore >= 28 ? 'inconclusive' : 'benign';
+	const confidence =
+		riskScore >= 78 || suspiciousSignals.length >= 4 ? 'high' : riskScore >= 40 || suspiciousSignals.length >= 2 ? 'medium' : 'low';
 
 	return normalizeAssessment({
 		analystQuestions: [
@@ -614,9 +669,9 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 					? `The page contains enough phishing indicators to warrant escalation or blocking, but a human analyst should confirm context.`
 					: verdict === 'inconclusive'
 						? `The current evidence is mixed. Capture more telemetry or rescan before taking a final action.`
-						: `The current capture does not show strong phishing traits, although external telemetry could still change the decision.`,
+						: `The current capture does not show strong phishing traits. Keep the case open only if you have supporting telemetry or user reports.`,
 		highlight:
-			suspiciousSignals[0] || 'The current page evidence does not contain a dominant phishing indicator.',
+			suspiciousSignals[0] || benignSignals[0] || 'The current page evidence does not contain a dominant phishing indicator.',
 		impersonatedBrand,
 		recommendedAction:
 			verdict === 'malicious'
@@ -627,7 +682,10 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 						? 'Rescan the page and compare the hostname with known-good infrastructure.'
 						: 'Monitor only if you have additional reports or telemetry.',
 		riskScore,
-		suspiciousSignals,
+		suspiciousSignals:
+			suspiciousSignals.length > 0
+				? suspiciousSignals
+				: ['No high-confidence phishing indicator was identified in the current capture.'],
 		verdict,
 	});
 }
@@ -721,6 +779,33 @@ function inferBrandFromEvidence(evidence: RenderEvidence): string {
 	}
 
 	return 'Unknown';
+}
+
+function hostMatchesVisibleBrand(hostname: string, brand: string): boolean {
+	const normalizedHost = hostname.toLowerCase();
+	const suffixesByBrand: Record<string, string[]> = {
+		apple: ['apple.com', 'icloud.com'],
+		cloudflare: ['cloudflare.com', 'cloudflare.tv', 'cloudflareinsights.com'],
+		google: ['google.com', 'gmail.com', 'googleusercontent.com', 'withgoogle.com'],
+		microsoft: ['microsoft.com', 'live.com', 'office.com', 'outlook.com'],
+		paypal: ['paypal.com', 'paypalobjects.com'],
+	};
+	const allowedSuffixes = suffixesByBrand[brand.toLowerCase()] || [];
+
+	return allowedSuffixes.some((suffix) => normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`));
+}
+
+function isLikelyThirdPartyPlatformHost(hostname: string): boolean {
+	const normalizedHost = hostname.toLowerCase();
+	return [
+		'greenhouse.io',
+		'greenhouseboards.com',
+		'lever.co',
+		'workdayjobs.com',
+		'ashbyhq.com',
+		'notion.site',
+		'typeform.com',
+	].some((suffix) => normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`));
 }
 
 function shouldUseMockAi(env: AppEnv): boolean {

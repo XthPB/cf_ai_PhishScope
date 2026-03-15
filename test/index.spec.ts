@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import worker, { InvestigationCase } from '../src';
+import { buildEvidenceSnapshot, buildTranscript, createDefaultEvidence, createMessage } from '../src/shared';
 
 describe('PhishScope worker', () => {
 	it('serves the PhishScope app shell', async () => {
@@ -95,6 +96,33 @@ describe('PhishScope worker', () => {
 		expect(rescan.ok).toBe(true);
 		expect(rescanPayload.investigation.scanCount).toBe(2);
 		expect(rescanPayload.investigation.analystNote).toContain('second user report');
+	});
+
+	it('builds compact AI snapshots without embedding the screenshot payload', () => {
+		const evidence = {
+			...createDefaultEvidence('https://example.com'),
+			screenshotDataUrl: 'data:image/jpeg;base64,VERY-LONG-SCREENSHOT',
+			textExcerpt: 'A'.repeat(5000),
+		};
+
+		const snapshot = buildEvidenceSnapshot(evidence);
+
+		expect(snapshot).toContain('"screenshotCaptured": true');
+		expect(snapshot).not.toContain('VERY-LONG-SCREENSHOT');
+		expect(snapshot.length).toBeLessThan(4000);
+	});
+
+	it('truncates the transcript so follow-up prompts stay bounded', () => {
+		const messages = [
+			createMessage('user', 'B'.repeat(800), '2026-03-15T21:00:00.000Z'),
+			createMessage('assistant', 'C'.repeat(800), '2026-03-15T21:00:01.000Z'),
+		];
+
+		const transcript = buildTranscript(messages);
+
+		expect(transcript).toContain('USER:');
+		expect(transcript).toContain('ASSISTANT:');
+		expect(transcript.length).toBeLessThan(900);
 	});
 });
 

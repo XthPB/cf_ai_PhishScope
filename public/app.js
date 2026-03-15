@@ -6,7 +6,7 @@ const state = {
 	caseId: null,
 	health: null,
 	investigation: null,
-	loading: false,
+	loadingState: null,
 	pendingMessage: null,
 	recognition: null,
 };
@@ -92,11 +92,11 @@ function bindEvents() {
 
 		const url = elements.urlInput.value.trim();
 		const analystNote = elements.noteInput.value.trim();
-		if (!url || state.loading) {
+		if (!url || state.loadingState) {
 			return;
 		}
 
-		setLoading(true);
+		setLoading('analysis');
 		setStatus('Opening a new phishing investigation.');
 
 		try {
@@ -111,16 +111,16 @@ function bindEvents() {
 			console.error(error);
 			setStatus(error.message || 'Investigation failed.');
 		} finally {
-			setLoading(false);
+			setLoading(null);
 		}
 	});
 
 	elements.rescanButton.addEventListener('click', async () => {
-		if (!state.caseId || state.loading) {
+		if (!state.caseId || state.loadingState) {
 			return;
 		}
 
-		setLoading(true);
+		setLoading('analysis');
 		setStatus('Re-scanning the current case.');
 
 		try {
@@ -138,7 +138,7 @@ function bindEvents() {
 			console.error(error);
 			setStatus(error.message || 'Re-scan failed.');
 		} finally {
-			setLoading(false);
+			setLoading(null);
 		}
 	});
 
@@ -158,7 +158,7 @@ function bindEvents() {
 
 	elements.chatForm.addEventListener('submit', async (event) => {
 		event.preventDefault();
-		if (!state.caseId || state.loading) {
+		if (!state.caseId || state.loadingState) {
 			return;
 		}
 
@@ -174,7 +174,7 @@ function bindEvents() {
 			timestamp: new Date().toISOString(),
 		};
 		renderMessages();
-		setLoading(true);
+		setLoading('followup');
 		setStatus('Running analyst follow-up.');
 
 		try {
@@ -192,7 +192,7 @@ function bindEvents() {
 			renderMessages();
 			setStatus(error.message || 'Follow-up failed.');
 		} finally {
-			setLoading(false);
+			setLoading(null);
 		}
 	});
 
@@ -330,9 +330,9 @@ function renderHealth() {
 function renderCaseSnapshot() {
 	const investigation = state.investigation;
 	const hasCase = Boolean(investigation);
-	elements.rescanButton.disabled = !hasCase || state.loading;
-	elements.copyLinkButton.disabled = !hasCase || state.loading;
-	elements.chatSendButton.disabled = !hasCase || state.loading;
+	elements.rescanButton.disabled = !hasCase || Boolean(state.loadingState);
+	elements.copyLinkButton.disabled = !hasCase || Boolean(state.loadingState);
+	elements.chatSendButton.disabled = !hasCase || Boolean(state.loadingState);
 
 	if (!investigation) {
 		elements.caseLabel.textContent = 'No case';
@@ -480,7 +480,6 @@ function renderMessages() {
 		messages.forEach((message, index) => {
 			const article = document.createElement('article');
 			article.className = `message message--${message.role}`;
-			article.style.animationDelay = `${index * 40}ms`;
 
 			const meta = document.createElement('div');
 			meta.className = 'message__meta';
@@ -495,7 +494,7 @@ function renderMessages() {
 		});
 	}
 
-	elements.typing.hidden = !state.loading;
+	elements.typing.hidden = state.loadingState !== 'followup';
 	elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
@@ -515,13 +514,14 @@ function createEmptyText(text) {
 	return paragraph;
 }
 
-function setLoading(isLoading) {
-	state.loading = isLoading;
+function setLoading(nextState) {
+	state.loadingState = nextState;
+	const isLoading = Boolean(nextState);
 	elements.analyzeButton.disabled = isLoading;
 	elements.rescanButton.disabled = isLoading || !state.caseId;
 	elements.copyLinkButton.disabled = isLoading || !state.caseId;
 	elements.chatSendButton.disabled = isLoading || !state.caseId;
-	elements.typing.hidden = !isLoading;
+	elements.typing.hidden = nextState !== 'followup';
 }
 
 function setStatus(message) {

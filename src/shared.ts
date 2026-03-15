@@ -226,6 +226,14 @@ export function parseAiResponse(response: unknown): unknown {
 		return parseAiResponse(response.response);
 	}
 
+	if (isRecord(response) && 'result' in response) {
+		return parseAiResponse(response.result);
+	}
+
+	if (isRecord(response) && 'output_text' in response) {
+		return parseAiResponse(response.output_text);
+	}
+
 	if (typeof response === 'string') {
 		const cleaned = response.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
 		try {
@@ -239,17 +247,53 @@ export function parseAiResponse(response: unknown): unknown {
 }
 
 export function buildEvidenceSnapshot(evidence: RenderEvidence): string {
-	return JSON.stringify(evidence, null, 2);
+	const snapshot = {
+		captureTimestamp: evidence.captureTimestamp,
+		finalUrl: evidence.finalUrl,
+		forms: evidence.forms.slice(0, 4).map((form) => ({
+			action: sanitizeText(form.action, 180),
+			hasPassword: form.hasPassword,
+			inputTypes: form.inputTypes.slice(0, 6),
+			method: form.method,
+		})),
+		hostname: evidence.hostname,
+		pageTitle: evidence.pageTitle,
+		requestedUrl: evidence.requestedUrl,
+		screenshotCaptured: Boolean(evidence.screenshotDataUrl),
+		structuralSignals: evidence.structuralSignals.slice(0, 6),
+		textExcerpt: sanitizeText(evidence.textExcerpt, 1200),
+		topLinks: evidence.topLinks.slice(0, 8).map((link) => ({
+			href: sanitizeText(link.href, 180),
+			hostname: sanitizeText(link.hostname, 120),
+			text: sanitizeText(link.text, 60),
+		})),
+		visibleBrandHints: evidence.visibleBrandHints.slice(0, 6),
+	};
+
+	return JSON.stringify(snapshot, null, 2);
 }
 
 export function buildAssessmentSnapshot(assessment: InvestigationAssessment): string {
-	return JSON.stringify(assessment, null, 2);
+	const snapshot = {
+		analystQuestions: assessment.analystQuestions.slice(0, 3),
+		benignSignals: assessment.benignSignals.slice(0, 4),
+		confidence: assessment.confidence,
+		executiveSummary: sanitizeText(assessment.executiveSummary, 420),
+		highlight: sanitizeText(assessment.highlight, 180),
+		impersonatedBrand: assessment.impersonatedBrand,
+		recommendedAction: sanitizeText(assessment.recommendedAction, 220),
+		riskScore: assessment.riskScore,
+		suspiciousSignals: assessment.suspiciousSignals.slice(0, 6),
+		verdict: assessment.verdict,
+	};
+
+	return JSON.stringify(snapshot, null, 2);
 }
 
 export function buildTranscript(messages: CaseMessage[]): string {
 	return messages
-		.slice(-10)
-		.map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+		.slice(-8)
+		.map((message) => `${message.role.toUpperCase()}: ${sanitizeText(message.content, 320)}`)
 		.join('\n');
 }
 

@@ -59,8 +59,7 @@ textarea {
 }
 
 .hero,
-.panel,
-.message {
+.panel {
 	animation: rise 480ms ease both;
 }
 
@@ -537,29 +536,6 @@ textarea:focus {
 	white-space: pre-wrap;
 }
 
-.typing {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-	color: var(--muted);
-}
-
-.typing span {
-	width: 10px;
-	height: 10px;
-	border-radius: 999px;
-	background: var(--brand);
-	animation: pulse 860ms infinite ease-in-out;
-}
-
-.typing span:nth-child(2) {
-	animation-delay: 120ms;
-}
-
-.typing span:nth-child(3) {
-	animation-delay: 240ms;
-}
-
 .feature-list {
 	margin: 0;
 	padding-left: 18px;
@@ -569,9 +545,36 @@ textarea:focus {
 	color: rgba(239, 246, 255, 0.84);
 }
 
+.profile-list {
+	display: grid;
+	gap: 12px;
+}
+
+.profile-row {
+	padding: 14px 16px;
+	border-radius: var(--radius-md);
+	border: 1px solid rgba(148, 163, 184, 0.12);
+	background: rgba(8, 17, 30, 0.56);
+}
+
+.profile-row .detail-text {
+	margin-top: 6px;
+}
+
 .empty-text {
 	color: var(--muted);
 	line-height: 1.55;
+}
+
+.activity-note {
+	padding: 12px 14px;
+	border-radius: 16px;
+	border: 1px solid rgba(56, 189, 248, 0.14);
+	background: rgba(8, 17, 30, 0.56);
+	color: var(--muted);
+	font-family: 'IBM Plex Mono', monospace;
+	font-size: 0.84rem;
+	letter-spacing: 0.02em;
 }
 
 @keyframes rise {
@@ -583,20 +586,6 @@ textarea:focus {
 	to {
 		opacity: 1;
 		transform: translateY(0);
-	}
-}
-
-@keyframes pulse {
-	0%,
-	80%,
-	100% {
-		opacity: 0.24;
-		transform: translateY(0);
-	}
-
-	40% {
-		opacity: 1;
-		transform: translateY(-4px);
 	}
 }
 

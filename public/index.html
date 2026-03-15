@@ -20,7 +20,7 @@
 		<div class="shell">
 			<header class="hero">
 				<div class="hero__copy">
-					<p class="eyebrow">Cloudflare Security Demo</p>
+					<p class="eyebrow">Cloudflare phishing investigation console</p>
 					<h1>PhishScope</h1>
 					<p class="lede">
 						An AI-assisted phishing investigation workstation. Render suspicious pages, preserve visual evidence,
@@ -126,16 +126,24 @@
 					<section class="panel">
 						<div class="panel__heading">
 							<div>
-								<p class="panel__eyebrow">Workflow</p>
-								<h2>Why this stands out</h2>
+								<p class="panel__eyebrow">System Profile</p>
+								<h2>Investigation pipeline</h2>
 							</div>
 						</div>
-						<ul class="feature-list">
-							<li>Captures visual evidence with Browser Rendering instead of trusting raw text alone.</li>
-							<li>Uses Workers AI for structured phishing verdicts and analyst guidance.</li>
-							<li>Stores each case in a Durable Object for persistent investigation memory.</li>
-							<li>Supports voice-captured analyst notes and chat follow-up during triage.</li>
-						</ul>
+						<div class="profile-list">
+							<div class="profile-row">
+								<p class="detail-label">Capture</p>
+								<p class="detail-text">Browser Rendering preserves the actual page state, visible copy, and form structure.</p>
+							</div>
+							<div class="profile-row">
+								<p class="detail-label">Analysis</p>
+								<p class="detail-text">Workers AI produces structured phishing assessments and follow-up guidance per case.</p>
+							</div>
+							<div class="profile-row">
+								<p class="detail-label">State</p>
+								<p class="detail-text">Durable Objects keep the investigation record, analyst notes, and chat context together.</p>
+							</div>
+						</div>
 					</section>
 				</aside>
 
@@ -258,11 +266,8 @@
 
 						<div id="analystQuestions" class="follow-up__list"></div>
 						<div id="messages" class="messages" aria-live="polite"></div>
-						<div id="typing" class="typing" hidden>
-							<span></span>
-							<span></span>
-							<span></span>
-							<p>Reviewing evidence and case history...</p>
+						<div id="typing" class="activity-note" hidden>
+							<p>Processing follow-up against the current case evidence.</p>
 						</div>
 
 						<form id="chatForm" class="chat-form">
