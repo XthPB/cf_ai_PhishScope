@@ -20,7 +20,8 @@
 	},
 	"vars": {
 		"MOCK_AI": "false",
-		"MOCK_BROWSER": "false"
+		"MOCK_BROWSER": "false",
+		"TURNSTILE_SITE_KEY": ""
 	},
 	"ai": {
 		"binding": "AI"
@@ -44,7 +45,41 @@
 	],
 	"observability": {
 		"enabled": true
-	}
+	},
+	// Uncomment after creating a D1 database:
+	// "d1_databases": [
+	// 	{
+	// 		"binding": "DB",
+	// 		"database_name": "cf-ai-phishscope",
+	// 		"database_id": "<YOUR_D1_DATABASE_ID>"
+	// 	}
+	// ],
+	// Uncomment to emit structured investigation metrics to Workers Analytics Engine.
+	// "analytics_engine_datasets": [
+	// 	{
+	// 		"binding": "ANALYTICS",
+	// 		"dataset": "phishscope_events"
+	// 	}
+	// ],
+	// Uncomment after provisioning Rate Limiting namespaces in your Cloudflare account.
+	// "ratelimits": [
+	// 	{
+	// 		"name": "CREATE_LIMITER",
+	// 		"namespace_id": "<CREATE_LIMITER_NAMESPACE_ID>",
+	// 		"simple": {
+	// 			"limit": 10,
+	// 			"period": 60
+	// 		}
+	// 	},
+	// 	{
+	// 		"name": "FOLLOWUP_LIMITER",
+	// 		"namespace_id": "<FOLLOWUP_LIMITER_NAMESPACE_ID>",
+	// 		"simple": {
+	// 			"limit": 30,
+	// 			"period": 60
+	// 		}
+	// 	}
+	// ]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

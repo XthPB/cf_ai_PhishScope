@@ -2,9 +2,14 @@ export const APP_NAME = 'PhishScope';
 export const MODEL_NAME = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 export const STORAGE_KEY = 'phishscope-case';
 export const MAX_CASE_MESSAGES = 16;
+export const MAX_CASE_EVENTS = 24;
 
 export type ChatRole = 'user' | 'assistant';
 export type Confidence = 'low' | 'medium' | 'high';
+export type CaseStatus = 'triage' | 'monitor' | 'needs_review' | 'escalated';
+export type CaseActor = 'system' | 'analyst' | 'automation';
+export type FormClassification = 'credential' | 'application' | 'search' | 'input' | 'generic';
+export type LinkClassification = 'same-host' | 'same-root' | 'brand-related' | 'external' | 'ip-literal';
 export type Verdict = 'malicious' | 'suspicious' | 'benign' | 'inconclusive';
 
 export interface CaseMessage {
@@ -16,23 +21,42 @@ export interface CaseMessage {
 
 export interface FormEvidence {
 	action: string;
+	classification: FormClassification;
 	method: string;
 	inputTypes: string[];
 	hasPassword: boolean;
 }
 
 export interface LinkEvidence {
+	classification: LinkClassification;
 	href: string;
 	hostname: string;
 	text: string;
+}
+
+export interface EvidenceHashes {
+	metadataSha256: string;
+	screenshotSha256: string;
+	textSha256: string;
+}
+
+export interface LinkSummary {
+	brandRelated: number;
+	external: number;
+	ipLiteral: number;
+	sameHost: number;
+	sameRoot: number;
 }
 
 export interface RenderEvidence {
 	captureTimestamp: string;
 	finalUrl: string;
 	forms: FormEvidence[];
+	hashes: EvidenceHashes;
 	hostname: string;
+	linkSummary: LinkSummary;
 	pageTitle: string;
+	redirected: boolean;
 	requestedUrl: string;
 	screenshotDataUrl: string;
 	structuralSignals: string[];
@@ -54,6 +78,15 @@ export interface InvestigationAssessment {
 	verdict: Verdict;
 }
 
+export interface CaseEvent {
+	actor: CaseActor;
+	detail: string;
+	id: string;
+	summary: string;
+	timestamp: string;
+	type: string;
+}
+
 export interface InvestigationState {
 	analystNote: string;
 	caseId: string;
@@ -61,8 +94,12 @@ export interface InvestigationState {
 	evidence: RenderEvidence;
 	latestReply: string;
 	messages: CaseMessage[];
+	scheduledRescanAt: string;
 	scanCount: number;
+	status: CaseStatus;
+	tags: string[];
 	targetUrl: string;
+	timeline: CaseEvent[];
 	updatedAt: string;
 	assessment: InvestigationAssessment;
 }
@@ -74,6 +111,32 @@ export interface FollowUpTurn {
 	recommendedAction: string;
 }
 
+export interface CaseListItem {
+	caseId: string;
+	confidence: Confidence;
+	hostname: string;
+	impersonatedBrand: string;
+	pageTitle: string;
+	riskScore: number;
+	scanCount: number;
+	status: CaseStatus;
+	summary: string;
+	tags: string[];
+	targetUrl: string;
+	updatedAt: string;
+	verdict: Verdict;
+}
+
+export interface DashboardSummary {
+	averageRiskScore: number;
+	escalatedCases: number;
+	monitorCases: number;
+	needsReviewCases: number;
+	recentCases: CaseListItem[];
+	totalCases: number;
+	triageCases: number;
+}
+
 export function createDefaultEvidence(targetUrl = ''): RenderEvidence {
 	const url = normalizeUrl(targetUrl) || 'https://example.com';
 	const hostname = getHostname(url) || 'example.com';
@@ -82,8 +145,21 @@ export function createDefaultEvidence(targetUrl = ''): RenderEvidence {
 		captureTimestamp: new Date().toISOString(),
 		finalUrl: url,
 		forms: [],
+		hashes: {
+			metadataSha256: '',
+			screenshotSha256: '',
+			textSha256: '',
+		},
 		hostname,
+		linkSummary: {
+			brandRelated: 0,
+			external: 0,
+			ipLiteral: 0,
+			sameHost: 0,
+			sameRoot: 0,
+		},
 		pageTitle: 'No capture yet',
+		redirected: false,
 		requestedUrl: targetUrl || url,
 		screenshotDataUrl: createPlaceholderScreenshot(hostname, 'Pending capture'),
 		structuralSignals: ['No render evidence collected yet.'],
@@ -124,8 +200,12 @@ export function createInvestigationState(caseId: string, targetUrl: string, anal
 		evidence: createDefaultEvidence(normalizedUrl),
 		latestReply: 'Submit a suspicious URL to start the investigation.',
 		messages: [],
+		scheduledRescanAt: '',
 		scanCount: 0,
+		status: 'triage',
+		tags: [],
 		targetUrl: normalizedUrl,
+		timeline: [],
 		updatedAt: now,
 	};
 }
@@ -141,6 +221,38 @@ export function createMessage(role: ChatRole, content: string, timestamp = new D
 
 export function trimMessages(messages: CaseMessage[]): CaseMessage[] {
 	return messages.slice(-MAX_CASE_MESSAGES);
+}
+
+export function trimEvents(events: CaseEvent[]): CaseEvent[] {
+	return events.slice(-MAX_CASE_EVENTS);
+}
+
+export function createCaseEvent(
+	type: string,
+	summary: string,
+	options: { actor?: CaseActor; detail?: string; timestamp?: string } = {},
+): CaseEvent {
+	return {
+		actor: options.actor || 'system',
+		detail: sanitizeText(options.detail, 320),
+		id: crypto.randomUUID(),
+		summary: sanitizeText(summary, 180),
+		timestamp: options.timestamp || new Date().toISOString(),
+		type: sanitizeText(type, 64) || 'event',
+	};
+}
+
+export function deriveCaseStatus(verdict: Verdict): CaseStatus {
+	switch (verdict) {
+		case 'malicious':
+			return 'escalated';
+		case 'suspicious':
+			return 'needs_review';
+		case 'benign':
+			return 'monitor';
+		default:
+			return 'triage';
+	}
 }
 
 export function sanitizeText(value: unknown, maxLength: number): string {
@@ -173,8 +285,11 @@ export function normalizeEvidence(input: unknown, previous = createDefaultEviden
 		captureTimestamp: sanitizeText(candidate.captureTimestamp, 64) || previous.captureTimestamp,
 		finalUrl,
 		forms: normalizeForms(candidate.forms, previous.forms),
+		hashes: normalizeHashes(candidate.hashes, previous.hashes),
 		hostname: getHostname(finalUrl) || getHostname(requestedUrl) || previous.hostname,
+		linkSummary: normalizeLinkSummary(candidate.linkSummary, previous.linkSummary),
 		pageTitle: sanitizeText(candidate.pageTitle, 140) || previous.pageTitle,
+		redirected: typeof candidate.redirected === 'boolean' ? candidate.redirected : previous.redirected,
 		requestedUrl,
 		screenshotDataUrl: sanitizeDataUrl(candidate.screenshotDataUrl) || previous.screenshotDataUrl,
 		structuralSignals: sanitizeList(candidate.structuralSignals, 160, 8, previous.structuralSignals),
@@ -252,17 +367,22 @@ export function buildEvidenceSnapshot(evidence: RenderEvidence): string {
 		finalUrl: evidence.finalUrl,
 		forms: evidence.forms.slice(0, 4).map((form) => ({
 			action: sanitizeText(form.action, 180),
+			classification: form.classification,
 			hasPassword: form.hasPassword,
 			inputTypes: form.inputTypes.slice(0, 6),
 			method: form.method,
 		})),
+		hashes: evidence.hashes,
 		hostname: evidence.hostname,
+		linkSummary: evidence.linkSummary,
 		pageTitle: evidence.pageTitle,
+		redirected: evidence.redirected,
 		requestedUrl: evidence.requestedUrl,
 		screenshotCaptured: Boolean(evidence.screenshotDataUrl),
 		structuralSignals: evidence.structuralSignals.slice(0, 6),
 		textExcerpt: sanitizeText(evidence.textExcerpt, 1200),
 		topLinks: evidence.topLinks.slice(0, 8).map((link) => ({
+			classification: link.classification,
 			href: sanitizeText(link.href, 180),
 			hostname: sanitizeText(link.hostname, 120),
 			text: sanitizeText(link.text, 60),
@@ -288,6 +408,24 @@ export function buildAssessmentSnapshot(assessment: InvestigationAssessment): st
 	};
 
 	return JSON.stringify(snapshot, null, 2);
+}
+
+export function toCaseListItem(investigation: InvestigationState): CaseListItem {
+	return {
+		caseId: investigation.caseId,
+		confidence: investigation.assessment.confidence,
+		hostname: investigation.evidence.hostname,
+		impersonatedBrand: investigation.assessment.impersonatedBrand,
+		pageTitle: investigation.evidence.pageTitle,
+		riskScore: investigation.assessment.riskScore,
+		scanCount: investigation.scanCount,
+		status: investigation.status,
+		summary: sanitizeText(investigation.assessment.executiveSummary, 260),
+		tags: investigation.tags.slice(0, 8),
+		targetUrl: investigation.targetUrl,
+		updatedAt: investigation.updatedAt,
+		verdict: investigation.assessment.verdict,
+	};
 }
 
 export function buildTranscript(messages: CaseMessage[]): string {
@@ -419,6 +557,7 @@ function normalizeForms(value: unknown, fallback: FormEvidence[]): FormEvidence[
 			const method = sanitizeText(candidate.method, 20).toLowerCase() || 'get';
 			return {
 				action: sanitizeText(candidate.action, 240),
+				classification: normalizeFormClassification(candidate.classification, 'generic'),
 				hasPassword: Boolean(candidate.hasPassword),
 				inputTypes: sanitizeList(candidate.inputTypes, 24, 8, []),
 				method,
@@ -439,6 +578,7 @@ function normalizeLinks(value: unknown, fallback: LinkEvidence[]): LinkEvidence[
 			const candidate = isRecord(entry) ? entry : {};
 			const href = sanitizeText(candidate.href, 320);
 			return {
+				classification: normalizeLinkClassification(candidate.classification, 'external'),
 				href,
 				hostname: sanitizeText(candidate.hostname, 120) || getHostname(href),
 				text: sanitizeText(candidate.text, 80),
@@ -453,6 +593,26 @@ function normalizeLinks(value: unknown, fallback: LinkEvidence[]): LinkEvidence[
 function sanitizeDataUrl(value: unknown): string {
 	const candidate = sanitizeText(value, 900000);
 	return candidate.startsWith('data:image/') ? candidate : '';
+}
+
+function normalizeHashes(value: unknown, fallback: EvidenceHashes): EvidenceHashes {
+	const candidate = isRecord(value) ? value : {};
+	return {
+		metadataSha256: sanitizeText(candidate.metadataSha256, 96) || fallback.metadataSha256,
+		screenshotSha256: sanitizeText(candidate.screenshotSha256, 96) || fallback.screenshotSha256,
+		textSha256: sanitizeText(candidate.textSha256, 96) || fallback.textSha256,
+	};
+}
+
+function normalizeLinkSummary(value: unknown, fallback: LinkSummary): LinkSummary {
+	const candidate = isRecord(value) ? value : {};
+	return {
+		brandRelated: normalizeCount(candidate.brandRelated, fallback.brandRelated),
+		external: normalizeCount(candidate.external, fallback.external),
+		ipLiteral: normalizeCount(candidate.ipLiteral, fallback.ipLiteral),
+		sameHost: normalizeCount(candidate.sameHost, fallback.sameHost),
+		sameRoot: normalizeCount(candidate.sameRoot, fallback.sameRoot),
+	};
 }
 
 function normalizeConfidence(value: unknown, fallback: Confidence): Confidence {
@@ -475,6 +635,37 @@ function normalizeRiskScore(value: unknown, fallback: number): number {
 	const numeric = typeof value === 'number' ? value : Number(value);
 	if (Number.isFinite(numeric)) {
 		return Math.max(0, Math.min(100, Math.round(numeric)));
+	}
+
+	return fallback;
+}
+
+function normalizeCount(value: unknown, fallback: number): number {
+	const numeric = typeof value === 'number' ? value : Number(value);
+	if (Number.isFinite(numeric)) {
+		return Math.max(0, Math.round(numeric));
+	}
+
+	return fallback;
+}
+
+function normalizeFormClassification(value: unknown, fallback: FormClassification): FormClassification {
+	if (value === 'credential' || value === 'application' || value === 'search' || value === 'input' || value === 'generic') {
+		return value;
+	}
+
+	return fallback;
+}
+
+function normalizeLinkClassification(value: unknown, fallback: LinkClassification): LinkClassification {
+	if (
+		value === 'same-host' ||
+		value === 'same-root' ||
+		value === 'brand-related' ||
+		value === 'external' ||
+		value === 'ip-literal'
+	) {
+		return value;
 	}
 
 	return fallback;

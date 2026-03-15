@@ -1,14 +1,33 @@
 const STORAGE_KEY = 'phishscope-active-case';
+const SEARCH_DEBOUNCE_MS = 200;
+const PLACEHOLDER_SCREENSHOT =
+	'data:image/svg+xml;base64,' +
+	btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" fill="none">
+	<rect width="1440" height="960" rx="28" fill="#08131f"/>
+	<rect x="36" y="36" width="1368" height="888" rx="24" fill="#0d1d2f" stroke="#18324b"/>
+	<text x="92" y="164" fill="#e8f1ff" font-family="Arial, sans-serif" font-size="56" font-weight="700">PhishScope Analyst Console</text>
+	<text x="92" y="238" fill="#8ea6c0" font-family="Arial, sans-serif" font-size="30">Run or load a case to render preserved evidence.</text>
+	<rect x="92" y="314" width="1256" height="516" rx="20" fill="#0a1624" stroke="#18324b"/>
+	<text x="128" y="410" fill="#7f9bbb" font-family="Arial, sans-serif" font-size="28">Screenshot will appear here after Browser Rendering captures the page.</text>
+</svg>`);
 
 const state = {
+	activeTab: 'overviewTab',
 	activeVoiceButton: null,
 	activeVoiceField: null,
 	caseId: null,
+	caseList: [],
+	dashboard: null,
 	health: null,
 	investigation: null,
 	loadingState: null,
 	pendingMessage: null,
 	recognition: null,
+	relatedCases: [],
+	searchTimer: null,
+	statusMessage: 'Loading dashboard.',
+	turnstileToken: '',
+	turnstileWidgetId: null,
 };
 
 const elements = {
@@ -16,11 +35,17 @@ const elements = {
 	analyzeButton: document.getElementById('analyzeButton'),
 	analyzeForm: document.getElementById('analyzeForm'),
 	analystQuestions: document.getElementById('analystQuestions'),
+	avgRiskMetric: document.getElementById('avgRiskMetric'),
 	benignSignals: document.getElementById('benignSignals'),
 	brandHints: document.getElementById('brandHints'),
 	brandValue: document.getElementById('brandValue'),
 	browserModeBadge: document.getElementById('browserModeBadge'),
 	caseLabel: document.getElementById('caseLabel'),
+	caseList: document.getElementById('caseList'),
+	caseListCount: document.getElementById('caseListCount'),
+	caseSearchInput: document.getElementById('caseSearchInput'),
+	caseStatusFilter: document.getElementById('caseStatusFilter'),
+	caseVerdictFilter: document.getElementById('caseVerdictFilter'),
 	chatForm: document.getElementById('chatForm'),
 	chatInput: document.getElementById('chatInput'),
 	chatSendButton: document.getElementById('chatSendButton'),
@@ -28,62 +53,76 @@ const elements = {
 	captureMeta: document.getElementById('captureMeta'),
 	confidenceValue: document.getElementById('confidenceValue'),
 	copyLinkButton: document.getElementById('copyLinkButton'),
+	escalatedMetric: document.getElementById('escalatedMetric'),
 	finalUrl: document.getElementById('finalUrl'),
 	formsList: document.getElementById('formsList'),
 	highlightText: document.getElementById('highlightText'),
 	hostValue: document.getElementById('hostValue'),
+	linkSummaryList: document.getElementById('linkSummaryList'),
 	linksList: document.getElementById('linksList'),
 	messages: document.getElementById('messages'),
+	needsReviewMetric: document.getElementById('needsReviewMetric'),
 	noteInput: document.getElementById('noteInput'),
 	noteVoiceButton: document.getElementById('noteVoiceButton'),
 	pageTitle: document.getElementById('pageTitle'),
+	provenanceList: document.getElementById('provenanceList'),
 	recommendedAction: document.getElementById('recommendedAction'),
+	relatedCasesList: document.getElementById('relatedCasesList'),
 	requestedUrl: document.getElementById('requestedUrl'),
 	rescanButton: document.getElementById('rescanButton'),
 	riskMeterFill: document.getElementById('riskMeterFill'),
 	riskScoreValue: document.getElementById('riskScoreValue'),
 	scanCountValue: document.getElementById('scanCountValue'),
+	scheduleDelaySelect: document.getElementById('scheduleDelaySelect'),
+	scheduleRescanButton: document.getElementById('scheduleRescanButton'),
+	scheduledRescanValue: document.getElementById('scheduledRescanValue'),
 	screenshotImage: document.getElementById('screenshotImage'),
 	statusText: document.getElementById('statusText'),
+	statusValue: document.getElementById('statusValue'),
 	structuralSignals: document.getElementById('structuralSignals'),
 	summaryText: document.getElementById('summaryText'),
 	suspiciousSignals: document.getElementById('suspiciousSignals'),
+	tabButtons: [...document.querySelectorAll('[data-tab-target]')],
+	tagList: document.getElementById('tagList'),
 	textExcerpt: document.getElementById('textExcerpt'),
+	timelineList: document.getElementById('timelineList'),
+	totalCasesMetric: document.getElementById('totalCasesMetric'),
+	turnstileBadge: document.getElementById('turnstileBadge'),
+	turnstileContainer: document.getElementById('turnstileContainer'),
+	turnstileSection: document.getElementById('turnstileSection'),
 	typing: document.getElementById('typing'),
 	urlInput: document.getElementById('urlInput'),
 	verdictBadge: document.getElementById('verdictBadge'),
 	verdictValue: document.getElementById('verdictValue'),
+	workspaceHost: document.getElementById('workspaceHost'),
 };
 
 bindEvents();
 setupVoiceInput();
+render();
+
 bootstrap().catch((error) => {
 	console.error(error);
 	setStatus('Initialization failed.');
 });
 
 async function bootstrap() {
-	await refreshHealth();
+	await Promise.all([refreshHealth(), refreshDashboard(), refreshCaseList()]);
 
-	const url = new URL(window.location.href);
-	const caseFromUrl = url.searchParams.get('case');
-	const caseFromStorage = window.localStorage.getItem(STORAGE_KEY);
-	const preferredCase = caseFromUrl || caseFromStorage;
-
-	if (!preferredCase) {
-		render();
-		return;
+	const preferredCase = getPreferredCaseId();
+	if (preferredCase) {
+		try {
+			await loadCase(preferredCase);
+			setStatus('Loaded an existing investigation case.');
+			return;
+		} catch (error) {
+			console.warn('Existing case could not be loaded.', error);
+			clearPersistedCase();
+		}
 	}
 
-	try {
-		const payload = await fetchJson(`/api/cases/${preferredCase}`);
-		applyPayload({ caseId: preferredCase, ...payload });
-		setStatus('Loaded an existing investigation case.');
-	} catch (error) {
-		console.warn('Existing case could not be loaded.', error);
-		window.localStorage.removeItem(STORAGE_KEY);
-		render();
-	}
+	setStatus(state.caseList.length ? 'Dashboard ready. Select an indexed case or open a new one.' : 'Dashboard ready. Open a new phishing case to begin.');
+	render();
 }
 
 function bindEvents() {
@@ -91,22 +130,27 @@ function bindEvents() {
 		event.preventDefault();
 
 		const url = elements.urlInput.value.trim();
-		const analystNote = elements.noteInput.value.trim();
 		if (!url || state.loadingState) {
 			return;
 		}
 
 		setLoading('analysis');
-		setStatus('Opening a new phishing investigation.');
+		setStatus('Opening a new case and capturing evidence.');
 
 		try {
 			const payload = await fetchJson('/api/cases', {
-				body: JSON.stringify({ analystNote, url }),
+				body: JSON.stringify({
+					analystNote: elements.noteInput.value.trim(),
+					turnstileToken: state.turnstileToken || undefined,
+					url,
+				}),
 				headers: { 'content-type': 'application/json' },
 				method: 'POST',
 			});
-			applyPayload(payload);
-			setStatus('Case opened and evidence captured.');
+			state.pendingMessage = null;
+			await applyPayload(payload, { refreshCatalog: true });
+			resetTurnstile();
+			setStatus('Case opened and indexed.');
 		} catch (error) {
 			console.error(error);
 			setStatus(error.message || 'Investigation failed.');
@@ -121,7 +165,7 @@ function bindEvents() {
 		}
 
 		setLoading('analysis');
-		setStatus('Re-scanning the current case.');
+		setStatus('Running a fresh capture for the active case.');
 
 		try {
 			const payload = await fetchJson(`/api/cases/${state.caseId}/rescan`, {
@@ -132,11 +176,39 @@ function bindEvents() {
 				headers: { 'content-type': 'application/json' },
 				method: 'POST',
 			});
-			applyPayload(payload);
-			setStatus('Case re-scanned.');
+			await applyPayload(payload, { refreshCatalog: true });
+			setStatus('Manual rescan completed.');
 		} catch (error) {
 			console.error(error);
-			setStatus(error.message || 'Re-scan failed.');
+			setStatus(error.message || 'Rescan failed.');
+		} finally {
+			setLoading(null);
+		}
+	});
+
+	elements.scheduleRescanButton.addEventListener('click', async () => {
+		if (!state.caseId || state.loadingState) {
+			return;
+		}
+
+		setLoading('analysis');
+		setStatus('Scheduling an automated rescan.');
+
+		try {
+			const payload = await fetchJson(`/api/cases/${state.caseId}/schedule-rescan`, {
+				body: JSON.stringify({
+					analystNote: elements.noteInput.value.trim(),
+					delaySeconds: Number(elements.scheduleDelaySelect.value),
+					url: elements.urlInput.value.trim(),
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			});
+			await applyPayload(payload, { refreshCatalog: true });
+			setStatus(`Automated rescan queued for ${formatDate(payload.scheduledRescan?.runAt || state.investigation?.scheduledRescanAt)}.`);
+		} catch (error) {
+			console.error(error);
+			setStatus(error.message || 'Scheduled rescan failed.');
 		} finally {
 			setLoading(null);
 		}
@@ -148,7 +220,7 @@ function bindEvents() {
 		}
 
 		try {
-			await navigator.clipboard.writeText(window.location.href);
+			await navigator.clipboard.writeText(buildCaseUrl(state.caseId));
 			setStatus('Case link copied.');
 		} catch (error) {
 			console.error(error);
@@ -173,9 +245,9 @@ function bindEvents() {
 			role: 'user',
 			timestamp: new Date().toISOString(),
 		};
-		renderMessages();
 		setLoading('followup');
-		setStatus('Running analyst follow-up.');
+		setStatus('Processing follow-up against the active case.');
+		renderMessages();
 
 		try {
 			const payload = await fetchJson(`/api/cases/${state.caseId}/messages`, {
@@ -184,8 +256,8 @@ function bindEvents() {
 				method: 'POST',
 			});
 			state.pendingMessage = null;
-			applyPayload(payload);
-			setStatus('Follow-up added to the case.');
+			await applyPayload(payload, { refreshCatalog: true });
+			setStatus('Follow-up response added to the case timeline.');
 		} catch (error) {
 			console.error(error);
 			state.pendingMessage = null;
@@ -196,8 +268,53 @@ function bindEvents() {
 		}
 	});
 
-	elements.noteVoiceButton.addEventListener('click', () => startVoiceCapture(elements.noteInput, elements.noteVoiceButton));
-	elements.chatVoiceButton.addEventListener('click', () => startVoiceCapture(elements.chatInput, elements.chatVoiceButton));
+	elements.caseSearchInput.addEventListener('input', () => {
+		window.clearTimeout(state.searchTimer);
+		state.searchTimer = window.setTimeout(() => {
+			refreshCaseList().catch((error) => {
+				console.error(error);
+				setStatus(error.message || 'Case search failed.');
+			});
+		}, SEARCH_DEBOUNCE_MS);
+	});
+	elements.caseStatusFilter.addEventListener('change', () => {
+		refreshCaseList().catch((error) => {
+			console.error(error);
+			setStatus(error.message || 'Case filter failed.');
+		});
+	});
+	elements.caseVerdictFilter.addEventListener('change', () => {
+		refreshCaseList().catch((error) => {
+			console.error(error);
+			setStatus(error.message || 'Case filter failed.');
+		});
+	});
+
+	elements.caseList.addEventListener('click', async (event) => {
+		const row = event.target.closest('[data-case-id]');
+		if (!row || state.loadingState) {
+			return;
+		}
+
+		try {
+			setStatus('Loading indexed case.');
+			await loadCase(row.dataset.caseId);
+			setStatus('Indexed case loaded.');
+		} catch (error) {
+			console.error(error);
+			setStatus(error.message || 'Case load failed.');
+		}
+	});
+
+	elements.analystQuestions.addEventListener('click', (event) => {
+		const button = event.target.closest('[data-question]');
+		if (!button) {
+			return;
+		}
+
+		elements.chatInput.value = button.dataset.question || '';
+		elements.chatInput.focus();
+	});
 
 	elements.chatInput.addEventListener('keydown', (event) => {
 		if (event.key === 'Enter' && !event.shiftKey) {
@@ -205,15 +322,506 @@ function bindEvents() {
 			elements.chatForm.requestSubmit();
 		}
 	});
+
+	elements.tabButtons.forEach((button) => {
+		button.addEventListener('click', () => setActiveTab(button.dataset.tabTarget));
+	});
+
+	elements.noteVoiceButton.addEventListener('click', () => startVoiceCapture(elements.noteInput, elements.noteVoiceButton));
+	elements.chatVoiceButton.addEventListener('click', () => startVoiceCapture(elements.chatInput, elements.chatVoiceButton));
 }
 
 async function refreshHealth() {
 	try {
 		state.health = await fetchJson('/api/health');
 		renderHealth();
+		renderTurnstile();
 	} catch (error) {
 		console.warn('Health request failed.', error);
 	}
+}
+
+async function refreshDashboard() {
+	try {
+		const payload = await fetchJson('/api/dashboard');
+		state.dashboard = payload.dashboard || null;
+		renderDashboard();
+	} catch (error) {
+		console.warn('Dashboard request failed.', error);
+	}
+}
+
+async function refreshCaseList() {
+	const params = new URLSearchParams();
+	params.set('limit', '24');
+
+	if (elements.caseSearchInput.value.trim()) {
+		params.set('search', elements.caseSearchInput.value.trim());
+	}
+	if (elements.caseVerdictFilter.value !== 'all') {
+		params.set('verdict', elements.caseVerdictFilter.value);
+	}
+	if (elements.caseStatusFilter.value !== 'all') {
+		params.set('status', elements.caseStatusFilter.value);
+	}
+
+	const payload = await fetchJson(`/api/cases?${params.toString()}`);
+	state.caseList = Array.isArray(payload.cases) ? payload.cases : [];
+	renderCaseList();
+}
+
+async function loadCase(caseId) {
+	const payload = await fetchJson(`/api/cases/${caseId}`);
+	await applyPayload({ caseId, ...payload });
+}
+
+async function applyPayload(payload, options = {}) {
+	if (payload.caseId) {
+		state.caseId = payload.caseId;
+	}
+
+	if (payload.investigation) {
+		state.investigation = payload.investigation;
+		elements.urlInput.value = payload.investigation.targetUrl || '';
+		elements.noteInput.value = payload.investigation.analystNote || '';
+	}
+
+	state.relatedCases = Array.isArray(payload.relatedCases) ? payload.relatedCases : [];
+
+	if (payload.mode && state.health) {
+		state.health.aiMode = payload.mode.ai;
+		state.health.browserMode = payload.mode.browser;
+	}
+
+	persistActiveCase();
+	render();
+
+	if (options.refreshCatalog) {
+		await Promise.all([refreshDashboard(), refreshCaseList()]);
+	}
+}
+
+function render() {
+	renderHealth();
+	renderDashboard();
+	renderCaseList();
+	renderWorkspace();
+	renderQuestions();
+	renderMessages();
+	renderTabs();
+}
+
+function renderHealth() {
+	const aiLive = state.health?.aiMode === 'workers-ai';
+	const browserLive = state.health?.browserMode === 'browser-rendering';
+	const turnstileEnabled = Boolean(state.health?.features?.turnstile);
+
+	elements.aiModeBadge.textContent = aiLive ? 'Workers AI live' : 'Mock AI mode';
+	elements.aiModeBadge.className = `status-pill ${aiLive ? '' : 'status-pill--warning'}`.trim();
+	elements.browserModeBadge.textContent = browserLive ? 'Browser Rendering live' : 'Mock browser mode';
+	elements.browserModeBadge.className = `status-pill ${browserLive ? 'status-pill--quiet' : 'status-pill--warning'}`.trim();
+	elements.turnstileBadge.textContent = turnstileEnabled ? 'Turnstile enforced' : 'Intake hardening optional';
+	elements.turnstileBadge.className = `status-pill ${turnstileEnabled ? '' : 'status-pill--quiet'}`.trim();
+	elements.statusText.textContent = state.statusMessage;
+}
+
+function renderDashboard() {
+	const dashboard = state.dashboard || {
+		averageRiskScore: 0,
+		escalatedCases: 0,
+		needsReviewCases: 0,
+		totalCases: 0,
+	};
+
+	elements.totalCasesMetric.textContent = String(dashboard.totalCases || 0);
+	elements.needsReviewMetric.textContent = String(dashboard.needsReviewCases || 0);
+	elements.escalatedMetric.textContent = String(dashboard.escalatedCases || 0);
+	elements.avgRiskMetric.textContent = String(dashboard.averageRiskScore || 0);
+}
+
+function renderCaseList() {
+	elements.caseList.replaceChildren();
+	elements.caseListCount.textContent = `${state.caseList.length} case${state.caseList.length === 1 ? '' : 's'}`;
+
+	if (!state.caseList.length) {
+		elements.caseList.append(createEmptyText('No indexed cases match the current filters.'));
+		return;
+	}
+
+	state.caseList.forEach((item) => {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = `case-row ${item.caseId === state.caseId ? 'is-active' : ''}`.trim();
+		button.dataset.caseId = item.caseId;
+		button.innerHTML = `
+			<div class="case-row__top">
+				<div>
+					<p class="case-row__title">${escapeHtml(item.hostname || item.impersonatedBrand || 'Unknown host')}</p>
+					<p class="case-row__url">${escapeHtml(item.pageTitle || item.targetUrl)}</p>
+				</div>
+				<span class="mini-pill mini-pill--${escapeHtml(item.verdict)}">${escapeHtml(formatVerdict(item.verdict))}</span>
+			</div>
+			<div class="case-row__bottom">
+				<div class="case-row__meta">
+					<span class="mini-pill">risk ${escapeHtml(String(item.riskScore))}</span>
+					<span class="mini-pill">${escapeHtml(formatStatus(item.status))}</span>
+					<span class="mini-pill">${escapeHtml(String(item.scanCount))} scans</span>
+				</div>
+				<span class="mini-pill">${escapeHtml(item.impersonatedBrand || 'Unknown')}</span>
+			</div>
+		`;
+		elements.caseList.append(button);
+	});
+}
+
+function renderWorkspace() {
+	const investigation = state.investigation;
+	const evidence = investigation?.evidence;
+	const assessment = investigation?.assessment;
+	const hasCase = Boolean(investigation);
+	const isBusy = Boolean(state.loadingState);
+
+	elements.rescanButton.disabled = !hasCase || isBusy;
+	elements.scheduleRescanButton.disabled = !hasCase || isBusy;
+	elements.copyLinkButton.disabled = !hasCase;
+	elements.chatSendButton.disabled = !hasCase || isBusy;
+
+	if (!investigation || !evidence || !assessment) {
+		elements.caseLabel.textContent = 'No case selected';
+		elements.workspaceHost.textContent = 'Run a case to populate the investigation workspace.';
+		elements.verdictBadge.textContent = 'Awaiting scan';
+		elements.verdictBadge.className = 'verdict-pill verdict-pill--neutral';
+		elements.riskScoreValue.textContent = '0';
+		elements.verdictValue.textContent = 'Pending';
+		elements.statusValue.textContent = 'TRIAGE';
+		elements.scanCountValue.textContent = '0';
+		elements.confidenceValue.textContent = 'LOW';
+		elements.scheduledRescanValue.textContent = 'None';
+		elements.summaryText.textContent = 'Run a case to generate an executive summary.';
+		elements.highlightText.textContent = 'No evidence collected yet.';
+		elements.recommendedAction.textContent = 'Run a scan before making a decision.';
+		elements.brandValue.textContent = 'Unknown';
+		elements.hostValue.textContent = 'N/A';
+		elements.captureMeta.textContent = 'No capture yet';
+		elements.requestedUrl.textContent = 'N/A';
+		elements.finalUrl.textContent = 'N/A';
+		elements.pageTitle.textContent = 'No capture yet.';
+		elements.textExcerpt.textContent = 'No rendered text yet.';
+		elements.screenshotImage.src = PLACEHOLDER_SCREENSHOT;
+		elements.riskMeterFill.style.width = '0%';
+		renderTextList(elements.suspiciousSignals, ['No suspicious evidence collected yet.']);
+		renderTextList(elements.benignSignals, ['No benign evidence collected yet.']);
+		renderTextList(elements.structuralSignals, ['No structural indicators available yet.']);
+		renderTextList(elements.brandHints, ['No visible brand hints extracted.']);
+		renderTagList([]);
+		renderProvenanceList([]);
+		renderLinkSummary(null);
+		renderForms([]);
+		renderLinks([]);
+		renderTimeline([]);
+		renderRelatedCases([]);
+		return;
+	}
+
+	elements.caseLabel.textContent = `Case ${investigation.caseId.slice(0, 8).toUpperCase()}`;
+	elements.workspaceHost.textContent = `${evidence.hostname || 'Unknown host'} • updated ${formatDate(investigation.updatedAt)}`;
+	elements.verdictBadge.textContent = `${formatVerdict(assessment.verdict)} · ${assessment.riskScore}`;
+	elements.verdictBadge.className = `verdict-pill verdict-pill--${assessment.verdict}`;
+	elements.riskScoreValue.textContent = String(assessment.riskScore);
+	elements.verdictValue.textContent = formatVerdict(assessment.verdict);
+	elements.statusValue.textContent = formatStatus(investigation.status);
+	elements.scanCountValue.textContent = String(investigation.scanCount);
+	elements.confidenceValue.textContent = assessment.confidence.toUpperCase();
+	elements.scheduledRescanValue.textContent = investigation.scheduledRescanAt ? formatDate(investigation.scheduledRescanAt) : 'None';
+	elements.summaryText.textContent = assessment.executiveSummary;
+	elements.highlightText.textContent = assessment.highlight;
+	elements.recommendedAction.textContent = assessment.recommendedAction;
+	elements.brandValue.textContent = assessment.impersonatedBrand || 'Unknown';
+	elements.hostValue.textContent = evidence.hostname || 'N/A';
+	elements.captureMeta.textContent = `Captured ${formatDate(evidence.captureTimestamp)}`;
+	elements.requestedUrl.textContent = evidence.requestedUrl;
+	elements.finalUrl.textContent = evidence.finalUrl;
+	elements.pageTitle.textContent = evidence.pageTitle;
+	elements.textExcerpt.textContent = evidence.textExcerpt || 'No rendered text captured.';
+	elements.screenshotImage.src = evidence.screenshotDataUrl || PLACEHOLDER_SCREENSHOT;
+	elements.riskMeterFill.style.width = `${assessment.riskScore}%`;
+
+	renderTextList(elements.suspiciousSignals, assessment.suspiciousSignals);
+	renderTextList(elements.benignSignals, assessment.benignSignals);
+	renderTextList(elements.structuralSignals, evidence.structuralSignals);
+	renderTextList(elements.brandHints, evidence.visibleBrandHints.length ? evidence.visibleBrandHints : ['No visible brand hints extracted.']);
+	renderTagList(investigation.tags);
+	renderProvenanceList([
+		{ label: 'Screenshot SHA-256', value: evidence.hashes?.screenshotSha256 || 'Unavailable' },
+		{ label: 'Text SHA-256', value: evidence.hashes?.textSha256 || 'Unavailable' },
+		{ label: 'Metadata SHA-256', value: evidence.hashes?.metadataSha256 || 'Unavailable' },
+		{ label: 'Redirected', value: evidence.redirected ? 'Yes' : 'No' },
+	]);
+	renderLinkSummary(evidence.linkSummary);
+	renderForms(evidence.forms);
+	renderLinks(evidence.topLinks);
+	renderTimeline(investigation.timeline || []);
+	renderRelatedCases(state.relatedCases);
+}
+
+function renderQuestions() {
+	elements.analystQuestions.replaceChildren();
+
+	const questions = state.investigation?.assessment?.analystQuestions || [];
+	if (!questions.length) {
+		elements.analystQuestions.append(createEmptyText('Suggested analyst prompts will appear after the first assessment.'));
+		return;
+	}
+
+	questions.forEach((question) => {
+		const button = document.createElement('button');
+		button.className = 'follow-up__button';
+		button.type = 'button';
+		button.dataset.question = question;
+		button.textContent = question;
+		elements.analystQuestions.append(button);
+	});
+}
+
+function renderMessages() {
+	elements.messages.replaceChildren();
+
+	const messages = [...(state.investigation?.messages || [])];
+	if (state.pendingMessage) {
+		messages.push(state.pendingMessage);
+	}
+
+	if (!messages.length) {
+		elements.messages.append(createEmptyText('Open a case to preserve analyst notes, verdict updates, and follow-up answers in the case timeline.'));
+	} else {
+		messages.forEach((message) => {
+			const article = document.createElement('article');
+			article.className = `message message--${message.role}`;
+
+			const meta = document.createElement('div');
+			meta.className = 'message__meta';
+			meta.textContent = `${message.role === 'assistant' ? 'PhishScope' : 'Analyst'} · ${formatTime(message.timestamp)}`;
+
+			const body = document.createElement('p');
+			body.className = 'message__body';
+			body.textContent = message.content;
+
+			article.append(meta, body);
+			elements.messages.append(article);
+		});
+	}
+
+	elements.typing.hidden = state.loadingState !== 'followup';
+	scrollToBottom(elements.messages);
+}
+
+function renderTextList(root, values) {
+	root.replaceChildren();
+	values.forEach((value) => {
+		const item = document.createElement('li');
+		item.textContent = value;
+		root.append(item);
+	});
+}
+
+function renderTagList(tags) {
+	elements.tagList.replaceChildren();
+
+	if (!tags.length) {
+		elements.tagList.append(createEmptyText('No case tags assigned yet.'));
+		return;
+	}
+
+	tags.forEach((tag) => {
+		const chip = document.createElement('span');
+		chip.className = 'tag';
+		chip.textContent = tag;
+		elements.tagList.append(chip);
+	});
+}
+
+function renderProvenanceList(rows) {
+	elements.provenanceList.replaceChildren();
+
+	if (!rows.length) {
+		elements.provenanceList.append(createEmptyText('Evidence provenance will be attached after a render.'));
+		return;
+	}
+
+	rows.forEach((row) => {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'provenance-row';
+		wrapper.innerHTML = `
+			<p class="detail-label">${escapeHtml(row.label)}</p>
+			<p class="detail-text detail-text--mono">${escapeHtml(row.value)}</p>
+		`;
+		elements.provenanceList.append(wrapper);
+	});
+}
+
+function renderLinkSummary(summary) {
+	elements.linkSummaryList.replaceChildren();
+
+	if (!summary) {
+		elements.linkSummaryList.append(createEmptyText('Network summary is unavailable until links are extracted.'));
+		return;
+	}
+
+	const rows = [
+		{ label: 'Same host', value: summary.sameHost },
+		{ label: 'Same root', value: summary.sameRoot },
+		{ label: 'Brand related', value: summary.brandRelated },
+		{ label: 'External', value: summary.external },
+		{ label: 'IP literal', value: summary.ipLiteral },
+	];
+
+	rows.forEach((row) => {
+		const wrapper = document.createElement('div');
+		wrapper.className = 'provenance-row';
+		wrapper.innerHTML = `
+			<p class="detail-label">${escapeHtml(row.label)}</p>
+			<p class="detail-text">${escapeHtml(String(row.value))}</p>
+		`;
+		elements.linkSummaryList.append(wrapper);
+	});
+}
+
+function renderForms(forms) {
+	elements.formsList.replaceChildren();
+
+	if (!forms.length) {
+		elements.formsList.append(createEmptyText('No forms were extracted from the rendered page.'));
+		return;
+	}
+
+	forms.forEach((form) => {
+		const row = document.createElement('div');
+		row.className = 'artifact-row';
+		row.innerHTML = `
+			<span class="artifact-chip">${escapeHtml(form.classification)}</span>
+			<p><strong>Action:</strong> ${escapeHtml(form.action || 'None')}</p>
+			<p><strong>Method:</strong> ${escapeHtml((form.method || 'get').toUpperCase())}</p>
+			<p><strong>Password field:</strong> ${form.hasPassword ? 'Yes' : 'No'}</p>
+			<p><strong>Inputs:</strong> ${escapeHtml((form.inputTypes || []).join(', ') || 'None')}</p>
+		`;
+		elements.formsList.append(row);
+	});
+}
+
+function renderLinks(links) {
+	elements.linksList.replaceChildren();
+
+	if (!links.length) {
+		elements.linksList.append(createEmptyText('No visible links were extracted from the rendered page.'));
+		return;
+	}
+
+	links.forEach((link) => {
+		const row = document.createElement('div');
+		row.className = 'artifact-row';
+		row.innerHTML = `
+			<span class="artifact-chip">${escapeHtml(link.classification)}</span>
+			<p><strong>Host:</strong> ${escapeHtml(link.hostname || 'Unknown')}</p>
+			<p><strong>Text:</strong> ${escapeHtml(link.text || 'No visible text')}</p>
+			<p class="artifact-row__mono">${escapeHtml(link.href)}</p>
+		`;
+		elements.linksList.append(row);
+	});
+}
+
+function renderTimeline(events) {
+	elements.timelineList.replaceChildren();
+
+	if (!events.length) {
+		elements.timelineList.append(createEmptyText('Case activity will appear here after the first scan.'));
+		return;
+	}
+
+	[...events].reverse().forEach((event) => {
+		const row = document.createElement('div');
+		row.className = 'timeline-row';
+		row.innerHTML = `
+			<div class="timeline-row__top">
+				<p class="detail-label">${escapeHtml(event.type)}</p>
+				<span class="mini-pill">${escapeHtml(formatTime(event.timestamp))}</span>
+			</div>
+			<p class="timeline-row__summary">${escapeHtml(event.summary)}</p>
+			<p class="detail-text">${escapeHtml(event.detail || `${formatActor(event.actor)} activity`)}</p>
+		`;
+		elements.timelineList.append(row);
+	});
+}
+
+function renderRelatedCases(cases) {
+	elements.relatedCasesList.replaceChildren();
+
+	if (!cases.length) {
+		elements.relatedCasesList.append(createEmptyText('No related cases have been indexed yet.'));
+		return;
+	}
+
+	cases.forEach((item) => {
+		const row = document.createElement('button');
+		row.type = 'button';
+		row.className = 'related-row';
+		row.dataset.caseId = item.caseId;
+		row.innerHTML = `
+			<div class="related-row__top">
+				<p class="detail-label">${escapeHtml(item.hostname || item.impersonatedBrand || 'Unknown host')}</p>
+				<span class="mini-pill mini-pill--${escapeHtml(item.verdict)}">${escapeHtml(formatVerdict(item.verdict))}</span>
+			</div>
+			<p class="related-row__summary">${escapeHtml(item.summary || item.pageTitle || item.targetUrl)}</p>
+		`;
+		row.addEventListener('click', async () => {
+			try {
+				setStatus('Loading related case.');
+				await loadCase(item.caseId);
+				setStatus('Related case loaded.');
+			} catch (error) {
+				console.error(error);
+				setStatus(error.message || 'Related case load failed.');
+			}
+		});
+		elements.relatedCasesList.append(row);
+	});
+}
+
+function renderTabs() {
+	elements.tabButtons.forEach((button) => {
+		button.classList.toggle('is-active', button.dataset.tabTarget === state.activeTab);
+	});
+
+	document.querySelectorAll('.tab-panel').forEach((panel) => {
+		panel.classList.toggle('is-active', panel.id === state.activeTab);
+	});
+}
+
+function renderTurnstile() {
+	const siteKey = state.health?.turnstileSiteKey;
+	const enabled = Boolean(state.health?.features?.turnstile && siteKey);
+
+	elements.turnstileSection.hidden = !enabled;
+	if (!enabled || state.turnstileWidgetId !== null) {
+		return;
+	}
+
+	if (!window.turnstile?.render) {
+		window.setTimeout(renderTurnstile, 250);
+		return;
+	}
+
+	state.turnstileWidgetId = window.turnstile.render(elements.turnstileContainer, {
+		callback(token) {
+			state.turnstileToken = token;
+			setStatus('Turnstile verification completed.');
+		},
+		'expired-callback'() {
+			state.turnstileToken = '';
+			setStatus('Turnstile token expired. Verify again before intake.');
+		},
+		sitekey: siteKey,
+		'theme': 'dark',
+	});
 }
 
 function setupVoiceInput() {
@@ -231,7 +839,7 @@ function setupVoiceInput() {
 
 	recognition.addEventListener('start', () => {
 		if (state.activeVoiceButton) {
-			state.activeVoiceButton.textContent = 'Stop Voice';
+			state.activeVoiceButton.textContent = 'Stop voice';
 		}
 		setStatus('Listening for voice input.');
 	});
@@ -249,7 +857,7 @@ function setupVoiceInput() {
 
 	recognition.addEventListener('end', () => {
 		if (state.activeVoiceButton) {
-			state.activeVoiceButton.textContent = state.activeVoiceButton === elements.noteVoiceButton ? 'Voice Note' : 'Voice Question';
+			state.activeVoiceButton.textContent = state.activeVoiceButton === elements.noteVoiceButton ? 'Voice note' : 'Voice question';
 		}
 		state.activeVoiceButton = null;
 		state.activeVoiceField = null;
@@ -280,231 +888,73 @@ function startVoiceCapture(target, button) {
 	state.recognition.start();
 }
 
-function applyPayload(payload) {
-	if (payload.caseId) {
-		state.caseId = payload.caseId;
+function resetTurnstile() {
+	state.turnstileToken = '';
+	if (state.turnstileWidgetId !== null && window.turnstile?.reset) {
+		window.turnstile.reset(state.turnstileWidgetId);
 	}
+}
 
-	if (payload.investigation) {
-		state.investigation = payload.investigation;
-		elements.urlInput.value = payload.investigation.targetUrl || '';
-		elements.noteInput.value = payload.investigation.analystNote || '';
-	}
-
-	if (payload.mode && state.health) {
-		state.health.aiMode = payload.mode.ai;
-		state.health.browserMode = payload.mode.browser;
+function persistActiveCase() {
+	if (!state.caseId) {
+		clearPersistedCase();
+		return;
 	}
 
 	window.localStorage.setItem(STORAGE_KEY, state.caseId);
 	const url = new URL(window.location.href);
 	url.searchParams.set('case', state.caseId);
 	window.history.replaceState({}, '', url);
-
-	render();
 }
 
-function render() {
-	renderHealth();
-	renderCaseSnapshot();
-	renderAssessment();
-	renderEvidence();
-	renderArtifacts();
-	renderQuestions();
-	renderMessages();
+function clearPersistedCase() {
+	state.caseId = null;
+	window.localStorage.removeItem(STORAGE_KEY);
+	const url = new URL(window.location.href);
+	url.searchParams.delete('case');
+	window.history.replaceState({}, '', url);
 }
 
-function renderHealth() {
-	if (!state.health) {
-		return;
-	}
-
-	const aiLive = state.health.aiMode === 'workers-ai';
-	const browserLive = state.health.browserMode === 'browser-rendering';
-	elements.aiModeBadge.textContent = aiLive ? 'Workers AI live' : 'Mock AI mode';
-	elements.aiModeBadge.className = `status-pill ${aiLive ? '' : 'status-pill--warning'}`.trim();
-	elements.browserModeBadge.textContent = browserLive ? 'Browser Rendering live' : 'Mock browser mode';
-	elements.browserModeBadge.className = `status-pill ${browserLive ? 'status-pill--quiet' : 'status-pill--warning'}`.trim();
+function getPreferredCaseId() {
+	const url = new URL(window.location.href);
+	return url.searchParams.get('case') || window.localStorage.getItem(STORAGE_KEY);
 }
 
-function renderCaseSnapshot() {
-	const investigation = state.investigation;
-	const hasCase = Boolean(investigation);
-	elements.rescanButton.disabled = !hasCase || Boolean(state.loadingState);
-	elements.copyLinkButton.disabled = !hasCase || Boolean(state.loadingState);
-	elements.chatSendButton.disabled = !hasCase || Boolean(state.loadingState);
-
-	if (!investigation) {
-		elements.caseLabel.textContent = 'No case';
-		elements.riskScoreValue.textContent = '0';
-		elements.verdictValue.textContent = 'Pending';
-		elements.scanCountValue.textContent = '0';
-		elements.hostValue.textContent = 'N/A';
-		elements.recommendedAction.textContent = 'Run a scan before making a decision.';
-		elements.brandValue.textContent = 'Unknown';
-		elements.confidenceValue.textContent = 'LOW';
-		return;
-	}
-
-	elements.caseLabel.textContent = `Case ${investigation.caseId.slice(0, 8)}`;
-	elements.riskScoreValue.textContent = String(investigation.assessment.riskScore);
-	elements.verdictValue.textContent = investigation.assessment.verdict.toUpperCase();
-	elements.scanCountValue.textContent = String(investigation.scanCount);
-	elements.hostValue.textContent = investigation.evidence.hostname || 'N/A';
-	elements.recommendedAction.textContent = investigation.assessment.recommendedAction;
-	elements.brandValue.textContent = investigation.assessment.impersonatedBrand || 'Unknown';
-	elements.confidenceValue.textContent = investigation.assessment.confidence.toUpperCase();
+function setActiveTab(tabId) {
+	state.activeTab = tabId || 'overviewTab';
+	renderTabs();
 }
 
-function renderAssessment() {
-	const investigation = state.investigation;
-	if (!investigation) {
-		elements.summaryText.textContent = 'Run a capture to generate the executive summary, risk score, and suggested response.';
-		elements.highlightText.textContent = 'No evidence collected yet.';
-		elements.verdictBadge.textContent = 'Awaiting scan';
-		elements.verdictBadge.className = 'verdict-pill verdict-pill--neutral';
-		elements.riskMeterFill.style.width = '0%';
-		return;
-	}
-
-	const { assessment } = investigation;
-	elements.summaryText.textContent = assessment.executiveSummary;
-	elements.highlightText.textContent = assessment.highlight;
-	elements.verdictBadge.textContent = `${assessment.verdict.toUpperCase()} · ${assessment.riskScore}`;
-	elements.verdictBadge.className = `verdict-pill verdict-pill--${assessment.verdict}`;
-	elements.riskMeterFill.style.width = `${assessment.riskScore}%`;
+function setLoading(nextState) {
+	state.loadingState = nextState;
+	const isLoading = Boolean(nextState);
+	elements.analyzeButton.disabled = isLoading;
+	elements.rescanButton.disabled = !state.investigation || isLoading;
+	elements.scheduleRescanButton.disabled = !state.investigation || isLoading;
+	elements.chatSendButton.disabled = !state.investigation || isLoading;
 }
 
-function renderEvidence() {
-	const evidence = state.investigation?.evidence;
-	if (!evidence) {
-		elements.captureMeta.textContent = 'No capture yet';
-		elements.screenshotImage.src = '';
-		elements.requestedUrl.textContent = 'N/A';
-		elements.finalUrl.textContent = 'N/A';
-		elements.pageTitle.textContent = 'No capture yet.';
-		elements.textExcerpt.textContent = 'No rendered text yet.';
-		return;
-	}
-
-	elements.captureMeta.textContent = `Captured ${formatDate(evidence.captureTimestamp)}`;
-	elements.screenshotImage.src = evidence.screenshotDataUrl;
-	elements.requestedUrl.textContent = evidence.requestedUrl;
-	elements.finalUrl.textContent = evidence.finalUrl;
-	elements.pageTitle.textContent = evidence.pageTitle;
-	elements.textExcerpt.textContent = evidence.textExcerpt;
-	renderList(elements.suspiciousSignals, state.investigation.assessment.suspiciousSignals);
-	renderList(elements.benignSignals, state.investigation.assessment.benignSignals);
-	renderList(elements.structuralSignals, evidence.structuralSignals);
-	renderList(elements.brandHints, evidence.visibleBrandHints.length ? evidence.visibleBrandHints : ['No brand hints extracted.']);
+function setStatus(message) {
+	state.statusMessage = message;
+	elements.statusText.textContent = message;
 }
 
-function renderArtifacts() {
-	const evidence = state.investigation?.evidence;
-	elements.formsList.replaceChildren();
-	elements.linksList.replaceChildren();
+async function fetchJson(path, init = {}) {
+	const response = await fetch(path, init);
+	let payload = null;
 
-	if (!evidence) {
-		elements.formsList.append(createEmptyText('No form evidence yet.'));
-		elements.linksList.append(createEmptyText('No link evidence yet.'));
-		return;
+	try {
+		payload = await response.json();
+	} catch {
+		payload = null;
 	}
 
-	if (evidence.forms.length === 0) {
-		elements.formsList.append(createEmptyText('No forms were extracted from the rendered page.'));
-	} else {
-		evidence.forms.forEach((form) => {
-			const card = document.createElement('div');
-			card.className = 'artifact-row';
-			card.innerHTML = `
-				<p><strong>Action:</strong> ${escapeHtml(form.action || 'None')}</p>
-				<p><strong>Method:</strong> ${escapeHtml((form.method || 'get').toUpperCase())}</p>
-				<p><strong>Password field:</strong> ${form.hasPassword ? 'Yes' : 'No'}</p>
-				<p><strong>Inputs:</strong> ${escapeHtml(form.inputTypes.join(', ') || 'None')}</p>
-			`;
-			elements.formsList.append(card);
-		});
+	if (!response.ok) {
+		const message = payload?.error || `Request failed with status ${response.status}`;
+		throw new Error(message);
 	}
 
-	if (evidence.topLinks.length === 0) {
-		elements.linksList.append(createEmptyText('No visible links were extracted from the rendered page.'));
-	} else {
-		evidence.topLinks.forEach((link) => {
-			const row = document.createElement('div');
-			row.className = 'artifact-row';
-			row.innerHTML = `
-				<p><strong>Host:</strong> ${escapeHtml(link.hostname || 'Unknown')}</p>
-				<p><strong>Text:</strong> ${escapeHtml(link.text || 'No visible text')}</p>
-				<p class="artifact-row__mono">${escapeHtml(link.href)}</p>
-			`;
-			elements.linksList.append(row);
-		});
-	}
-}
-
-function renderQuestions() {
-	elements.analystQuestions.replaceChildren();
-
-	const questions = state.investigation?.assessment.analystQuestions || [];
-	if (questions.length === 0) {
-		elements.analystQuestions.append(createEmptyText('Suggested analyst questions will appear after the first scan.'));
-		return;
-	}
-
-	questions.forEach((question) => {
-		const button = document.createElement('button');
-		button.className = 'follow-up__button';
-		button.type = 'button';
-		button.textContent = question;
-		button.addEventListener('click', () => {
-			elements.chatInput.value = question;
-			elements.chatInput.focus();
-		});
-		elements.analystQuestions.append(button);
-	});
-}
-
-function renderMessages() {
-	elements.messages.replaceChildren();
-
-	const messages = [...(state.investigation?.messages || [])];
-	if (state.pendingMessage) {
-		messages.push(state.pendingMessage);
-	}
-
-	if (messages.length === 0) {
-		elements.messages.append(
-			createEmptyText('Open a case to preserve analyst notes, verdict updates, and follow-up answers in one investigation thread.'),
-		);
-	} else {
-		messages.forEach((message, index) => {
-			const article = document.createElement('article');
-			article.className = `message message--${message.role}`;
-
-			const meta = document.createElement('div');
-			meta.className = 'message__meta';
-			meta.textContent = `${message.role === 'assistant' ? 'PhishScope' : 'Analyst'} · ${formatTime(message.timestamp)}`;
-
-			const body = document.createElement('p');
-			body.className = 'message__body';
-			body.textContent = message.content;
-
-			article.append(meta, body);
-			elements.messages.append(article);
-		});
-	}
-
-	elements.typing.hidden = state.loadingState !== 'followup';
-	elements.messages.scrollTop = elements.messages.scrollHeight;
-}
-
-function renderList(root, values) {
-	root.replaceChildren();
-	values.forEach((value) => {
-		const item = document.createElement('li');
-		item.textContent = value;
-		root.append(item);
-	});
+	return payload || {};
 }
 
 function createEmptyText(text) {
@@ -514,49 +964,69 @@ function createEmptyText(text) {
 	return paragraph;
 }
 
-function setLoading(nextState) {
-	state.loadingState = nextState;
-	const isLoading = Boolean(nextState);
-	elements.analyzeButton.disabled = isLoading;
-	elements.rescanButton.disabled = isLoading || !state.caseId;
-	elements.copyLinkButton.disabled = isLoading || !state.caseId;
-	elements.chatSendButton.disabled = isLoading || !state.caseId;
-	elements.typing.hidden = nextState !== 'followup';
+function buildCaseUrl(caseId) {
+	const url = new URL(window.location.href);
+	url.searchParams.set('case', caseId);
+	return url.toString();
 }
 
-function setStatus(message) {
-	elements.statusText.textContent = message;
+function formatVerdict(verdict) {
+	return String(verdict || 'inconclusive').replace(/_/g, ' ').toUpperCase();
 }
 
-async function fetchJson(url, options) {
-	const response = await fetch(url, options);
-	const payload = await response.json().catch(() => ({}));
-	if (!response.ok) {
-		throw new Error(payload.error || 'Request failed.');
+function formatStatus(status) {
+	return String(status || 'triage').replace(/_/g, ' ').toUpperCase();
+}
+
+function formatActor(actor) {
+	return actor === 'automation' ? 'Automated' : actor === 'analyst' ? 'Analyst' : 'System';
+}
+
+function formatDate(value) {
+	if (!value) {
+		return 'N/A';
 	}
 
-	return payload;
-}
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return 'N/A';
+	}
 
-function formatTime(timestamp) {
-	return new Intl.DateTimeFormat(undefined, {
-		hour: 'numeric',
-		minute: '2-digit',
-	}).format(new Date(timestamp));
-}
-
-function formatDate(timestamp) {
 	return new Intl.DateTimeFormat(undefined, {
 		dateStyle: 'medium',
 		timeStyle: 'short',
-	}).format(new Date(timestamp));
+	}).format(date);
+}
+
+function formatTime(value) {
+	if (!value) {
+		return 'N/A';
+	}
+
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) {
+		return 'N/A';
+	}
+
+	return new Intl.DateTimeFormat(undefined, {
+		hour: 'numeric',
+		minute: '2-digit',
+	}).format(date);
+}
+
+function stringifyValue(value) {
+	return value == null ? '' : String(value);
 }
 
 function escapeHtml(value) {
-	return String(value)
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
+	return stringifyValue(value)
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
+}
+
+function scrollToBottom(root) {
+	root.scrollTop = root.scrollHeight;
 }

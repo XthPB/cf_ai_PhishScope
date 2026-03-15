@@ -13,7 +13,8 @@
 	},
 	"vars": {
 		"MOCK_AI": "true",
-		"MOCK_BROWSER": "true"
+		"MOCK_BROWSER": "true",
+		"TURNSTILE_SITE_KEY": ""
 	},
 	"durable_objects": {
 		"bindings": [
