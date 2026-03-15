@@ -1,14 +1,14 @@
 # AI Prompts Used
 
-This project was built with AI assistance. These are the main prompts and instructions used while designing and implementing it.
+This project was built with AI assistance. These are the main prompts and instructions used while designing and implementing PhishScope.
 
 ## Prompt log
 
-1. Build a professional, original Cloudflare AI assignment project from scratch with clear architecture, strong documentation, and production-quality polish.
-2. Use Cloudflare Workers AI with Llama 3.3, a coordination layer on Cloudflare, user input via chat or voice, and persistent memory or state.
-3. Prefer a simple, defensible architecture that a reviewer can understand quickly: Worker API, Durable Object session memory, and a front-end served on Cloudflare.
-4. Make the product more specific than a generic chatbot. Turn it into a strategy copilot that updates a persistent planning board after every turn.
-5. Use structured model output so the assistant reply and the stored memory board stay synchronized.
-6. Add optional browser voice input so the demo satisfies the chat or voice requirement in a visible way.
-7. Include a local mock mode for easier testing and a remote Workers AI mode for the real platform path.
-8. Write a README with exact local, remote, and deployment instructions, and include the repository naming requirement for submission.
+1. Build an original Cloudflare-native AI application for an internship assignment with a strong security or network focus.
+2. Replace the earlier generic AI concept with a stronger security product that better matches Cloudflare as a large cloud, network, and security company.
+3. Design a phishing investigation workstation called PhishScope that uses Browser Rendering for page capture, Workers AI for structured verdicts, and Durable Objects for case memory.
+4. Make the app feel like a real security workflow, not a generic chatbot. Preserve screenshot evidence, extracted forms, outbound links, risk score, verdict, and recommended action.
+5. Use structured model output so the phishing verdict remains machine-readable and consistent with the rendered evidence.
+6. Support user input through URL submission, analyst follow-up chat, and optional browser voice input for analyst notes or questions.
+7. Include deterministic mock mode for local development and tests, plus a live Cloudflare mode for Browser Rendering and Workers AI.
+8. Write a professional README that explains the security use case, architecture, testing steps, deployment path, and originality of the work.

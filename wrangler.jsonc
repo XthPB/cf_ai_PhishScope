@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "cf-ai-signalboard",
+	"name": "cf-ai-phishscope",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-03-10",
 	"compatibility_flags": [
@@ -17,23 +17,27 @@
 		"directory": "./public"
 	},
 	"vars": {
-		"MOCK_AI": "false"
+		"MOCK_AI": "false",
+		"MOCK_BROWSER": "false"
 	},
 	"ai": {
 		"binding": "AI"
 	},
+	"browser": {
+		"binding": "BROWSER"
+	},
 	"durable_objects": {
 		"bindings": [
 			{
-				"name": "SESSIONS",
-				"class_name": "ConversationSession"
+				"name": "CASES",
+				"class_name": "InvestigationCase"
 			}
 		]
 	},
 	"migrations": [
 		{
-			"tag": "v1",
-			"new_sqlite_classes": ["ConversationSession"]
+			"tag": "v2",
+			"new_sqlite_classes": ["InvestigationCase"]
 		}
 	],
 	"observability": {

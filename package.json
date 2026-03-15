@@ -1,5 +1,5 @@
 {
-	"name": "cf-ai-signalboard",
+	"name": "cf-ai-phishscope",
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
@@ -11,6 +11,9 @@
 		"test": "vitest",
 		"typecheck": "tsc --noEmit",
 		"cf-typegen": "wrangler types"
+	},
+	"dependencies": {
+		"@cloudflare/puppeteer": "^1.0.6"
 	},
 	"devDependencies": {
 		"@types/node": "^25.5.0",

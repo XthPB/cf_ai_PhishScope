@@ -1,63 +1,73 @@
 # cf_ai_signalboard
 
-Signalboard is an original AI-powered Cloudflare application built for the assignment requirements. It helps a user turn a rough product, campaign, or workflow idea into a sharper plan with persistent session memory, live board updates, and chat or voice input.
+PhishScope is an original AI-powered phishing investigation workstation built on Cloudflare. It captures suspicious pages with Browser Rendering, scores them with Workers AI, and stores each investigation in a Durable Object so the analyst can keep asking follow-up questions inside the same case.
 
-## Why it fits the assignment
+## Why this fits the assignment
 
-- `LLM`: Cloudflare Workers AI using `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
-- `Workflow / coordination`: a Durable Object coordinates each session and stores durable state
-- `User input`: browser chat UI plus optional browser voice dictation
-- `Memory / state`: each session keeps its conversation history and a persistent strategy board
+- `LLM`: Cloudflare Workers AI with `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
+- `Workflow / coordination`: a Durable Object coordinates each investigation case
+- `User input`: URL submission, analyst chat, and optional browser voice input
+- `Memory / state`: each case persists rendered evidence, verdicts, notes, and chat history
 
-## What the app does
+## Product concept
 
-- Starts a new strategy session and persists it behind a shareable session id
-- Accepts chat prompts or voice-captured text
-- Uses Workers AI to generate a response plus structured board updates
-- Maintains a memory board with:
-  - project name
-  - objective
-  - audience
-  - tone
-  - constraints
-  - risks
-  - next actions
-- Falls back to deterministic mock mode locally if live AI is unavailable
+PhishScope is designed like a phishing triage desk rather than a generic chatbot.
+
+The analyst:
+
+1. submits a suspicious URL and an optional note
+2. captures visual and structural evidence from the page
+3. receives a structured phishing assessment
+4. continues the investigation with follow-up chat in the same case
+
+Each case preserves:
+
+- requested URL
+- final URL after render
+- screenshot evidence
+- visible text excerpt
+- extracted forms
+- extracted links
+- suspicious and benign signals
+- verdict, confidence, risk score, and recommended action
+- analyst note and follow-up conversation
 
 ## Stack
 
-- Cloudflare Worker for routing and API endpoints
-- Durable Object for per-session coordination and state
-- Workers AI for Llama 3.3 inference
-- Static assets for the front-end
-- Vitest with Cloudflare Workers pool for route tests
+- Cloudflare Worker for API routing and front-end serving
+- Cloudflare Browser Rendering for visual page capture and DOM extraction
+- Cloudflare Workers AI for phishing verdicts and analyst guidance
+- Cloudflare Durable Objects for per-case persistence and coordination
+- Static asset front-end for the phishing investigation console
+- Vitest for local route and state-flow tests
 
 ## Project structure
 
-- `src/index.ts`: Worker routes and Durable Object session coordinator
-- `src/shared.ts`: shared session types, normalization, and mock-mode helpers
-- `public/index.html`: app shell
-- `public/app.js`: front-end session and chat logic
-- `public/styles.css`: custom interface styling
+- `src/index.ts`: Worker routes, Browser Rendering capture, Workers AI analysis, Durable Object case logic
+- `src/shared.ts`: investigation schema, normalization, and deterministic mock fixtures
+- `public/index.html`: application shell
+- `public/app.js`: front-end case lifecycle, rendering, and voice input
+- `public/styles.css`: custom security-console UI
 - `PROMPTS.md`: AI prompts used while building the project
 
-## Run locally
+## Run locally in deterministic mock mode
 
-### 1. Install dependencies
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 2. Start the app in local mock mode
-
-Create a `.dev.vars` file in the project root:
+Create a `.dev.vars` file:
 
 ```bash
-echo "MOCK_AI=true" > .dev.vars
+cat <<'EOF' > .dev.vars
+MOCK_AI=true
+MOCK_BROWSER=true
+EOF
 ```
 
-Then run:
+Start the app:
 
 ```bash
 npm run dev
@@ -65,11 +75,18 @@ npm run dev
 
 Open [http://localhost:8787](http://localhost:8787).
 
-This mode exercises the UI, routing, Durable Object state, and session memory without requiring a live Workers AI connection.
+Mock mode still demonstrates:
 
-## Run with live Workers AI
+- case creation
+- persisted investigation memory
+- verdict rendering
+- evidence panels
+- analyst follow-up chat
+- voice note / voice question UI in supported browsers
 
-Authenticate first:
+## Run with live Cloudflare services
+
+Check authentication:
 
 ```bash
 npx wrangler whoami
@@ -81,15 +98,25 @@ If needed:
 npx wrangler login
 ```
 
-Then start remote dev:
+Use remote dev for the live path:
 
 ```bash
 npm run dev:remote
 ```
 
-Open the preview URL from Wrangler. In this mode, the app calls Workers AI using Llama 3.3.
+This is the recommended way to test live Workers AI and Browser Rendering together.
 
-## Test and type-check
+In live mode, verify:
+
+- `/api/health` reports `workers-ai` and `browser-rendering`
+- the screenshot panel shows a real page capture
+- the extracted forms and links reflect the rendered page
+- the verdict changes based on the captured evidence
+- the same case persists when reloading the case URL
+
+## Test and validate
+
+Run the full local check:
 
 ```bash
 npm run check
@@ -97,16 +124,20 @@ npm run check
 
 ## Deploy
 
+Deploy the Worker and static assets:
+
 ```bash
 npm run deploy
 ```
 
-The Worker serves both the front-end and the API, so deployment is a single Cloudflare publish step.
+The Worker serves the UI and API from one deployment.
 
-## Submission note
+## Submission notes
 
-The assignment requires the repository name to start with `cf_ai_`. Push this project to a repository named `cf_ai_signalboard` before submitting.
+- The repository name starts with `cf_ai_`, which satisfies the naming requirement.
+- `README.md` is included with local and live run instructions.
+- `PROMPTS.md` is included with the AI prompts used during development.
 
 ## Originality note
 
-The app logic, UI, state model, and documentation in this project are original work created for this assignment. Only the initial Cloudflare Worker scaffold came from the official `create-cloudflare` starter.
+The product concept, UI, case model, capture flow, and investigation workflow in this repo are original work created for this assignment. The only starter material was the initial official Cloudflare Worker scaffold before the project was fully rewritten into PhishScope.

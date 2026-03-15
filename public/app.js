@@ -1,225 +1,226 @@
-const STARTER_PROMPTS = [
-	'Plan a two-week launch for a support copilot aimed at Shopify merchants with only one engineer available.',
-	'Help me define an onboarding assistant for a B2B SaaS app, including audience, risks, and a thin-slice MVP.',
-	'Turn a rough idea for an AI research dashboard into a scoped plan with constraints, milestones, and open questions.',
-];
-
-const STORAGE_KEY = 'signalboard-active-session';
+const STORAGE_KEY = 'phishscope-active-case';
 
 const state = {
-	followUps: [],
-	highlight: 'Waiting for the first turn.',
-	listening: false,
+	activeVoiceButton: null,
+	activeVoiceField: null,
+	caseId: null,
+	health: null,
+	investigation: null,
 	loading: false,
-	mode: 'Initializing',
-	model: '',
 	pendingMessage: null,
 	recognition: null,
-	session: null,
-	sessionId: null,
 };
 
 const elements = {
-	boardAudience: document.getElementById('boardAudience'),
-	boardConfidence: document.getElementById('boardConfidence'),
-	boardConstraints: document.getElementById('boardConstraints'),
-	boardHighlight: document.getElementById('boardHighlight'),
-	boardNextActions: document.getElementById('boardNextActions'),
-	boardObjective: document.getElementById('boardObjective'),
-	boardProject: document.getElementById('boardProject'),
-	boardRisks: document.getElementById('boardRisks'),
-	boardTone: document.getElementById('boardTone'),
-	composerForm: document.getElementById('composerForm'),
+	aiModeBadge: document.getElementById('aiModeBadge'),
+	analyzeButton: document.getElementById('analyzeButton'),
+	analyzeForm: document.getElementById('analyzeForm'),
+	analystQuestions: document.getElementById('analystQuestions'),
+	benignSignals: document.getElementById('benignSignals'),
+	brandHints: document.getElementById('brandHints'),
+	brandValue: document.getElementById('brandValue'),
+	browserModeBadge: document.getElementById('browserModeBadge'),
+	caseLabel: document.getElementById('caseLabel'),
+	chatForm: document.getElementById('chatForm'),
+	chatInput: document.getElementById('chatInput'),
+	chatSendButton: document.getElementById('chatSendButton'),
+	chatVoiceButton: document.getElementById('chatVoiceButton'),
+	captureMeta: document.getElementById('captureMeta'),
+	confidenceValue: document.getElementById('confidenceValue'),
 	copyLinkButton: document.getElementById('copyLinkButton'),
-	followUps: document.getElementById('followUps'),
-	messageInput: document.getElementById('messageInput'),
+	finalUrl: document.getElementById('finalUrl'),
+	formsList: document.getElementById('formsList'),
+	highlightText: document.getElementById('highlightText'),
+	hostValue: document.getElementById('hostValue'),
+	linksList: document.getElementById('linksList'),
 	messages: document.getElementById('messages'),
-	modeBadge: document.getElementById('modeBadge'),
-	newSessionButton: document.getElementById('newSessionButton'),
-	promptGrid: document.getElementById('promptGrid'),
-	resetButton: document.getElementById('resetButton'),
-	sendButton: document.getElementById('sendButton'),
-	sessionLabel: document.getElementById('sessionLabel'),
+	noteInput: document.getElementById('noteInput'),
+	noteVoiceButton: document.getElementById('noteVoiceButton'),
+	pageTitle: document.getElementById('pageTitle'),
+	recommendedAction: document.getElementById('recommendedAction'),
+	requestedUrl: document.getElementById('requestedUrl'),
+	rescanButton: document.getElementById('rescanButton'),
+	riskMeterFill: document.getElementById('riskMeterFill'),
+	riskScoreValue: document.getElementById('riskScoreValue'),
+	scanCountValue: document.getElementById('scanCountValue'),
+	screenshotImage: document.getElementById('screenshotImage'),
 	statusText: document.getElementById('statusText'),
+	structuralSignals: document.getElementById('structuralSignals'),
+	summaryText: document.getElementById('summaryText'),
+	suspiciousSignals: document.getElementById('suspiciousSignals'),
+	textExcerpt: document.getElementById('textExcerpt'),
 	typing: document.getElementById('typing'),
-	voiceButton: document.getElementById('voiceButton'),
-	voiceSupportLabel: document.getElementById('voiceSupportLabel'),
+	urlInput: document.getElementById('urlInput'),
+	verdictBadge: document.getElementById('verdictBadge'),
+	verdictValue: document.getElementById('verdictValue'),
 };
 
-renderPromptGrid();
-setupVoiceInput();
 bindEvents();
+setupVoiceInput();
 bootstrap().catch((error) => {
 	console.error(error);
-	setStatus('Could not initialize the app.');
+	setStatus('Initialization failed.');
 });
 
 async function bootstrap() {
 	await refreshHealth();
 
 	const url = new URL(window.location.href);
-	const sessionFromUrl = url.searchParams.get('session');
-	const sessionFromStorage = window.localStorage.getItem(STORAGE_KEY);
-	const preferredSession = sessionFromUrl || sessionFromStorage;
+	const caseFromUrl = url.searchParams.get('case');
+	const caseFromStorage = window.localStorage.getItem(STORAGE_KEY);
+	const preferredCase = caseFromUrl || caseFromStorage;
 
-	if (preferredSession) {
-		try {
-			const data = await fetchJson(`/api/sessions/${preferredSession}`);
-			applyPayload({ ...data, sessionId: preferredSession });
-			setStatus('Loaded an existing session.');
-			return;
-		} catch (error) {
-			console.warn('Existing session could not be loaded, creating a new one.', error);
-		}
+	if (!preferredCase) {
+		render();
+		return;
 	}
 
-	await createSession('Created a fresh session.');
+	try {
+		const payload = await fetchJson(`/api/cases/${preferredCase}`);
+		applyPayload({ caseId: preferredCase, ...payload });
+		setStatus('Loaded an existing investigation case.');
+	} catch (error) {
+		console.warn('Existing case could not be loaded.', error);
+		window.localStorage.removeItem(STORAGE_KEY);
+		render();
+	}
 }
 
 function bindEvents() {
-	elements.composerForm.addEventListener('submit', async (event) => {
+	elements.analyzeForm.addEventListener('submit', async (event) => {
 		event.preventDefault();
-		const message = elements.messageInput.value.trim();
-		if (!message || state.loading) {
-			return;
-		}
 
-		elements.messageInput.value = '';
-		await sendMessage(message);
-	});
-
-	elements.messageInput.addEventListener('keydown', async (event) => {
-		if (event.key === 'Enter' && !event.shiftKey) {
-			event.preventDefault();
-			elements.composerForm.requestSubmit();
-		}
-	});
-
-	elements.newSessionButton.addEventListener('click', async () => {
-		if (state.loading) {
-			return;
-		}
-
-		await createSession('Created a new review session.');
-	});
-
-	elements.resetButton.addEventListener('click', async () => {
-		if (!state.sessionId || state.loading) {
+		const url = elements.urlInput.value.trim();
+		const analystNote = elements.noteInput.value.trim();
+		if (!url || state.loading) {
 			return;
 		}
 
 		setLoading(true);
-		setStatus('Resetting the board and conversation.');
+		setStatus('Opening a new phishing investigation.');
 
 		try {
-			const payload = await fetchJson(`/api/sessions/${state.sessionId}/reset`, {
+			const payload = await fetchJson('/api/cases', {
+				body: JSON.stringify({ analystNote, url }),
+				headers: { 'content-type': 'application/json' },
 				method: 'POST',
 			});
 			applyPayload(payload);
-			setStatus('Session reset.');
+			setStatus('Case opened and evidence captured.');
 		} catch (error) {
 			console.error(error);
-			setStatus('Reset failed. Try again.');
+			setStatus(error.message || 'Investigation failed.');
+		} finally {
+			setLoading(false);
+		}
+	});
+
+	elements.rescanButton.addEventListener('click', async () => {
+		if (!state.caseId || state.loading) {
+			return;
+		}
+
+		setLoading(true);
+		setStatus('Re-scanning the current case.');
+
+		try {
+			const payload = await fetchJson(`/api/cases/${state.caseId}/rescan`, {
+				body: JSON.stringify({
+					analystNote: elements.noteInput.value.trim(),
+					url: elements.urlInput.value.trim(),
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			});
+			applyPayload(payload);
+			setStatus('Case re-scanned.');
+		} catch (error) {
+			console.error(error);
+			setStatus(error.message || 'Re-scan failed.');
 		} finally {
 			setLoading(false);
 		}
 	});
 
 	elements.copyLinkButton.addEventListener('click', async () => {
-		if (!state.sessionId) {
+		if (!state.caseId) {
 			return;
 		}
 
 		try {
 			await navigator.clipboard.writeText(window.location.href);
-			setStatus('Session link copied.');
+			setStatus('Case link copied.');
 		} catch (error) {
 			console.error(error);
 			setStatus('Clipboard access failed.');
 		}
 	});
 
-	elements.voiceButton.addEventListener('click', () => {
-		if (!state.recognition) {
-			setStatus('Voice input is not supported in this browser.');
+	elements.chatForm.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		if (!state.caseId || state.loading) {
 			return;
 		}
 
-		if (state.listening) {
-			state.recognition.stop();
+		const message = elements.chatInput.value.trim();
+		if (!message) {
 			return;
 		}
 
-		state.recognition.start();
-	});
-}
-
-async function createSession(message) {
-	setLoading(true);
-	setStatus('Creating a new session.');
-
-	try {
-		const payload = await fetchJson('/api/sessions', { method: 'POST' });
-		applyPayload(payload);
-		setStatus(message);
-	} catch (error) {
-		console.error(error);
-		setStatus('Could not create a session.');
-	} finally {
-		setLoading(false);
-	}
-}
-
-async function sendMessage(message) {
-	if (!state.sessionId) {
-		await createSession('Created a new session before sending.');
-	}
-
-	state.pendingMessage = {
-		content: message,
-		role: 'user',
-		timestamp: new Date().toISOString(),
-	};
-	setLoading(true);
-	setStatus('Updating the board.');
-	renderMessages();
-
-	try {
-		const payload = await fetchJson(`/api/sessions/${state.sessionId}/messages`, {
-			body: JSON.stringify({ message }),
-			headers: { 'content-type': 'application/json' },
-			method: 'POST',
-		});
-		state.pendingMessage = null;
-		applyPayload(payload);
-		setStatus('Board updated.');
-	} catch (error) {
-		console.error(error);
-		state.pendingMessage = null;
+		elements.chatInput.value = '';
+		state.pendingMessage = {
+			content: message,
+			role: 'user',
+			timestamp: new Date().toISOString(),
+		};
 		renderMessages();
-		setStatus('The model response failed. Try again.');
-	} finally {
-		setLoading(false);
-	}
+		setLoading(true);
+		setStatus('Running analyst follow-up.');
+
+		try {
+			const payload = await fetchJson(`/api/cases/${state.caseId}/messages`, {
+				body: JSON.stringify({ message }),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			});
+			state.pendingMessage = null;
+			applyPayload(payload);
+			setStatus('Follow-up added to the case.');
+		} catch (error) {
+			console.error(error);
+			state.pendingMessage = null;
+			renderMessages();
+			setStatus(error.message || 'Follow-up failed.');
+		} finally {
+			setLoading(false);
+		}
+	});
+
+	elements.noteVoiceButton.addEventListener('click', () => startVoiceCapture(elements.noteInput, elements.noteVoiceButton));
+	elements.chatVoiceButton.addEventListener('click', () => startVoiceCapture(elements.chatInput, elements.chatVoiceButton));
+
+	elements.chatInput.addEventListener('keydown', (event) => {
+		if (event.key === 'Enter' && !event.shiftKey) {
+			event.preventDefault();
+			elements.chatForm.requestSubmit();
+		}
+	});
 }
 
 async function refreshHealth() {
 	try {
-		const health = await fetchJson('/api/health');
-		state.mode = health.mode;
-		state.model = health.model;
-		renderHeader();
+		state.health = await fetchJson('/api/health');
+		renderHealth();
 	} catch (error) {
-		console.warn('Health check failed.', error);
+		console.warn('Health request failed.', error);
 	}
 }
 
 function setupVoiceInput() {
 	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
 	if (!SpeechRecognition) {
-		elements.voiceSupportLabel.textContent = 'Voice not supported here';
-		elements.voiceButton.disabled = true;
+		elements.noteVoiceButton.disabled = true;
+		elements.chatVoiceButton.disabled = true;
 		return;
 	}
 
@@ -229,8 +230,9 @@ function setupVoiceInput() {
 	recognition.lang = 'en-US';
 
 	recognition.addEventListener('start', () => {
-		state.listening = true;
-		elements.voiceButton.textContent = 'Stop Voice';
+		if (state.activeVoiceButton) {
+			state.activeVoiceButton.textContent = 'Stop Voice';
+		}
 		setStatus('Listening for voice input.');
 	});
 
@@ -240,179 +242,286 @@ function setupVoiceInput() {
 			.join(' ')
 			.trim();
 
-		elements.messageInput.value = transcript;
+		if (state.activeVoiceField) {
+			state.activeVoiceField.value = transcript;
+		}
 	});
 
 	recognition.addEventListener('end', () => {
-		state.listening = false;
-		elements.voiceButton.textContent = 'Voice Input';
-		setStatus('Voice transcript inserted into the composer.');
+		if (state.activeVoiceButton) {
+			state.activeVoiceButton.textContent = state.activeVoiceButton === elements.noteVoiceButton ? 'Voice Note' : 'Voice Question';
+		}
+		state.activeVoiceButton = null;
+		state.activeVoiceField = null;
+		setStatus('Voice transcript inserted.');
 	});
 
 	recognition.addEventListener('error', (event) => {
-		console.warn('Voice input error.', event.error);
+		console.warn('Voice error', event.error);
 		setStatus(`Voice input error: ${event.error}`);
 	});
 
 	state.recognition = recognition;
-	elements.voiceSupportLabel.textContent = 'Voice ready in supported browsers';
+}
+
+function startVoiceCapture(target, button) {
+	if (!state.recognition) {
+		setStatus('Voice input is not supported in this browser.');
+		return;
+	}
+
+	if (state.activeVoiceButton === button) {
+		state.recognition.stop();
+		return;
+	}
+
+	state.activeVoiceField = target;
+	state.activeVoiceButton = button;
+	state.recognition.start();
 }
 
 function applyPayload(payload) {
-	if (payload.sessionId) {
-		state.sessionId = payload.sessionId;
+	if (payload.caseId) {
+		state.caseId = payload.caseId;
 	}
 
-	if (payload.session) {
-		state.session = payload.session;
+	if (payload.investigation) {
+		state.investigation = payload.investigation;
+		elements.urlInput.value = payload.investigation.targetUrl || '';
+		elements.noteInput.value = payload.investigation.analystNote || '';
 	}
 
-	if (payload.mode) {
-		state.mode = payload.mode;
+	if (payload.mode && state.health) {
+		state.health.aiMode = payload.mode.ai;
+		state.health.browserMode = payload.mode.browser;
 	}
 
-	if (payload.model) {
-		state.model = payload.model;
-	}
-
-	state.highlight = payload.highlight || state.highlight;
-	state.followUps = Array.isArray(payload.followUps) ? payload.followUps : state.followUps;
-
-	if (state.sessionId) {
-		window.localStorage.setItem(STORAGE_KEY, state.sessionId);
-		const url = new URL(window.location.href);
-		url.searchParams.set('session', state.sessionId);
-		window.history.replaceState({}, '', url);
-	}
+	window.localStorage.setItem(STORAGE_KEY, state.caseId);
+	const url = new URL(window.location.href);
+	url.searchParams.set('case', state.caseId);
+	window.history.replaceState({}, '', url);
 
 	render();
 }
 
 function render() {
-	renderHeader();
+	renderHealth();
+	renderCaseSnapshot();
+	renderAssessment();
+	renderEvidence();
+	renderArtifacts();
+	renderQuestions();
 	renderMessages();
-	renderBoard();
-	renderFollowUps();
 }
 
-function renderHeader() {
-	const sessionSnippet = state.sessionId ? state.sessionId.slice(0, 8) : 'pending';
-	elements.sessionLabel.textContent = `Session ${sessionSnippet}`;
-	elements.modeBadge.textContent =
-		state.mode === 'mock' ? 'Mock AI mode' : state.model ? `Workers AI live` : 'Initializing';
-	elements.modeBadge.classList.toggle('status-pill--warning', state.mode === 'mock');
+function renderHealth() {
+	if (!state.health) {
+		return;
+	}
+
+	const aiLive = state.health.aiMode === 'workers-ai';
+	const browserLive = state.health.browserMode === 'browser-rendering';
+	elements.aiModeBadge.textContent = aiLive ? 'Workers AI live' : 'Mock AI mode';
+	elements.aiModeBadge.className = `status-pill ${aiLive ? '' : 'status-pill--warning'}`.trim();
+	elements.browserModeBadge.textContent = browserLive ? 'Browser Rendering live' : 'Mock browser mode';
+	elements.browserModeBadge.className = `status-pill ${browserLive ? 'status-pill--quiet' : 'status-pill--warning'}`.trim();
+}
+
+function renderCaseSnapshot() {
+	const investigation = state.investigation;
+	const hasCase = Boolean(investigation);
+	elements.rescanButton.disabled = !hasCase || state.loading;
+	elements.copyLinkButton.disabled = !hasCase || state.loading;
+	elements.chatSendButton.disabled = !hasCase || state.loading;
+
+	if (!investigation) {
+		elements.caseLabel.textContent = 'No case';
+		elements.riskScoreValue.textContent = '0';
+		elements.verdictValue.textContent = 'Pending';
+		elements.scanCountValue.textContent = '0';
+		elements.hostValue.textContent = 'N/A';
+		elements.recommendedAction.textContent = 'Run a scan before making a decision.';
+		elements.brandValue.textContent = 'Unknown';
+		elements.confidenceValue.textContent = 'LOW';
+		return;
+	}
+
+	elements.caseLabel.textContent = `Case ${investigation.caseId.slice(0, 8)}`;
+	elements.riskScoreValue.textContent = String(investigation.assessment.riskScore);
+	elements.verdictValue.textContent = investigation.assessment.verdict.toUpperCase();
+	elements.scanCountValue.textContent = String(investigation.scanCount);
+	elements.hostValue.textContent = investigation.evidence.hostname || 'N/A';
+	elements.recommendedAction.textContent = investigation.assessment.recommendedAction;
+	elements.brandValue.textContent = investigation.assessment.impersonatedBrand || 'Unknown';
+	elements.confidenceValue.textContent = investigation.assessment.confidence.toUpperCase();
+}
+
+function renderAssessment() {
+	const investigation = state.investigation;
+	if (!investigation) {
+		elements.summaryText.textContent = 'Run a capture to generate the executive summary, risk score, and suggested response.';
+		elements.highlightText.textContent = 'No evidence collected yet.';
+		elements.verdictBadge.textContent = 'Awaiting scan';
+		elements.verdictBadge.className = 'verdict-pill verdict-pill--neutral';
+		elements.riskMeterFill.style.width = '0%';
+		return;
+	}
+
+	const { assessment } = investigation;
+	elements.summaryText.textContent = assessment.executiveSummary;
+	elements.highlightText.textContent = assessment.highlight;
+	elements.verdictBadge.textContent = `${assessment.verdict.toUpperCase()} · ${assessment.riskScore}`;
+	elements.verdictBadge.className = `verdict-pill verdict-pill--${assessment.verdict}`;
+	elements.riskMeterFill.style.width = `${assessment.riskScore}%`;
+}
+
+function renderEvidence() {
+	const evidence = state.investigation?.evidence;
+	if (!evidence) {
+		elements.captureMeta.textContent = 'No capture yet';
+		elements.screenshotImage.src = '';
+		elements.requestedUrl.textContent = 'N/A';
+		elements.finalUrl.textContent = 'N/A';
+		elements.pageTitle.textContent = 'No capture yet.';
+		elements.textExcerpt.textContent = 'No rendered text yet.';
+		return;
+	}
+
+	elements.captureMeta.textContent = `Captured ${formatDate(evidence.captureTimestamp)}`;
+	elements.screenshotImage.src = evidence.screenshotDataUrl;
+	elements.requestedUrl.textContent = evidence.requestedUrl;
+	elements.finalUrl.textContent = evidence.finalUrl;
+	elements.pageTitle.textContent = evidence.pageTitle;
+	elements.textExcerpt.textContent = evidence.textExcerpt;
+	renderList(elements.suspiciousSignals, state.investigation.assessment.suspiciousSignals);
+	renderList(elements.benignSignals, state.investigation.assessment.benignSignals);
+	renderList(elements.structuralSignals, evidence.structuralSignals);
+	renderList(elements.brandHints, evidence.visibleBrandHints.length ? evidence.visibleBrandHints : ['No brand hints extracted.']);
+}
+
+function renderArtifacts() {
+	const evidence = state.investigation?.evidence;
+	elements.formsList.replaceChildren();
+	elements.linksList.replaceChildren();
+
+	if (!evidence) {
+		elements.formsList.append(createEmptyText('No form evidence yet.'));
+		elements.linksList.append(createEmptyText('No link evidence yet.'));
+		return;
+	}
+
+	if (evidence.forms.length === 0) {
+		elements.formsList.append(createEmptyText('No forms were extracted from the rendered page.'));
+	} else {
+		evidence.forms.forEach((form) => {
+			const card = document.createElement('div');
+			card.className = 'artifact-row';
+			card.innerHTML = `
+				<p><strong>Action:</strong> ${escapeHtml(form.action || 'None')}</p>
+				<p><strong>Method:</strong> ${escapeHtml((form.method || 'get').toUpperCase())}</p>
+				<p><strong>Password field:</strong> ${form.hasPassword ? 'Yes' : 'No'}</p>
+				<p><strong>Inputs:</strong> ${escapeHtml(form.inputTypes.join(', ') || 'None')}</p>
+			`;
+			elements.formsList.append(card);
+		});
+	}
+
+	if (evidence.topLinks.length === 0) {
+		elements.linksList.append(createEmptyText('No visible links were extracted from the rendered page.'));
+	} else {
+		evidence.topLinks.forEach((link) => {
+			const row = document.createElement('div');
+			row.className = 'artifact-row';
+			row.innerHTML = `
+				<p><strong>Host:</strong> ${escapeHtml(link.hostname || 'Unknown')}</p>
+				<p><strong>Text:</strong> ${escapeHtml(link.text || 'No visible text')}</p>
+				<p class="artifact-row__mono">${escapeHtml(link.href)}</p>
+			`;
+			elements.linksList.append(row);
+		});
+	}
+}
+
+function renderQuestions() {
+	elements.analystQuestions.replaceChildren();
+
+	const questions = state.investigation?.assessment.analystQuestions || [];
+	if (questions.length === 0) {
+		elements.analystQuestions.append(createEmptyText('Suggested analyst questions will appear after the first scan.'));
+		return;
+	}
+
+	questions.forEach((question) => {
+		const button = document.createElement('button');
+		button.className = 'follow-up__button';
+		button.type = 'button';
+		button.textContent = question;
+		button.addEventListener('click', () => {
+			elements.chatInput.value = question;
+			elements.chatInput.focus();
+		});
+		elements.analystQuestions.append(button);
+	});
 }
 
 function renderMessages() {
-	const fragment = document.createDocumentFragment();
-	const messages = [...(state.session?.messages || [])];
+	elements.messages.replaceChildren();
 
+	const messages = [...(state.investigation?.messages || [])];
 	if (state.pendingMessage) {
 		messages.push(state.pendingMessage);
 	}
 
 	if (messages.length === 0) {
-		const empty = document.createElement('div');
-		empty.className = 'empty-state';
-		empty.innerHTML =
-			'<p>Start with one of the prompt cards or describe an initiative. The assistant will reply and update the persistent board on the right.</p>';
-		fragment.appendChild(empty);
+		elements.messages.append(
+			createEmptyText('Open a case to preserve analyst notes, verdict updates, and follow-up answers in one investigation thread.'),
+		);
 	} else {
 		messages.forEach((message, index) => {
 			const article = document.createElement('article');
 			article.className = `message message--${message.role}`;
-			article.style.animationDelay = `${index * 45}ms`;
+			article.style.animationDelay = `${index * 40}ms`;
 
 			const meta = document.createElement('div');
 			meta.className = 'message__meta';
-			meta.textContent = `${message.role === 'assistant' ? 'Signalboard' : 'You'} · ${formatTime(message.timestamp)}`;
+			meta.textContent = `${message.role === 'assistant' ? 'PhishScope' : 'Analyst'} · ${formatTime(message.timestamp)}`;
 
 			const body = document.createElement('p');
 			body.className = 'message__body';
 			body.textContent = message.content;
 
 			article.append(meta, body);
-			fragment.appendChild(article);
+			elements.messages.append(article);
 		});
 	}
 
-	elements.messages.replaceChildren(fragment);
 	elements.typing.hidden = !state.loading;
 	elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
-function renderBoard() {
-	const board = state.session?.board;
-	if (!board) {
-		return;
-	}
-
-	elements.boardProject.textContent = board.projectName;
-	elements.boardObjective.textContent = board.objective;
-	elements.boardAudience.textContent = board.audience;
-	elements.boardTone.textContent = board.tone;
-	elements.boardConfidence.textContent = board.confidence.toUpperCase();
-	elements.boardHighlight.textContent = state.highlight;
-
-	renderList(elements.boardConstraints, board.constraints);
-	renderList(elements.boardRisks, board.risks);
-	renderList(elements.boardNextActions, board.nextActions);
-}
-
-function renderFollowUps() {
-	elements.followUps.replaceChildren();
-
-	if (!state.followUps.length) {
-		const muted = document.createElement('p');
-		muted.className = 'hint';
-		muted.textContent = 'Follow-up questions will appear after the first reply.';
-		elements.followUps.appendChild(muted);
-		return;
-	}
-
-	state.followUps.forEach((prompt) => {
-		const button = document.createElement('button');
-		button.className = 'follow-up__button';
-		button.textContent = prompt;
-		button.type = 'button';
-		button.addEventListener('click', () => {
-			elements.messageInput.value = prompt;
-			elements.messageInput.focus();
-		});
-		elements.followUps.appendChild(button);
-	});
-}
-
-function renderPromptGrid() {
-	STARTER_PROMPTS.forEach((prompt) => {
-		const button = document.createElement('button');
-		button.className = 'prompt-card';
-		button.type = 'button';
-		button.textContent = prompt;
-		button.addEventListener('click', () => {
-			elements.messageInput.value = prompt;
-			elements.messageInput.focus();
-		});
-		elements.promptGrid.appendChild(button);
-	});
-}
-
 function renderList(root, values) {
 	root.replaceChildren();
-
 	values.forEach((value) => {
 		const item = document.createElement('li');
 		item.textContent = value;
-		root.appendChild(item);
+		root.append(item);
 	});
+}
+
+function createEmptyText(text) {
+	const paragraph = document.createElement('p');
+	paragraph.className = 'empty-text';
+	paragraph.textContent = text;
+	return paragraph;
 }
 
 function setLoading(isLoading) {
 	state.loading = isLoading;
-	elements.sendButton.disabled = isLoading;
-	elements.newSessionButton.disabled = isLoading;
-	elements.resetButton.disabled = isLoading;
-	elements.copyLinkButton.disabled = isLoading;
+	elements.analyzeButton.disabled = isLoading;
+	elements.rescanButton.disabled = isLoading || !state.caseId;
+	elements.copyLinkButton.disabled = isLoading || !state.caseId;
+	elements.chatSendButton.disabled = isLoading || !state.caseId;
+	elements.typing.hidden = !isLoading;
 }
 
 function setStatus(message) {
@@ -422,7 +531,6 @@ function setStatus(message) {
 async function fetchJson(url, options) {
 	const response = await fetch(url, options);
 	const payload = await response.json().catch(() => ({}));
-
 	if (!response.ok) {
 		throw new Error(payload.error || 'Request failed.');
 	}
@@ -435,4 +543,20 @@ function formatTime(timestamp) {
 		hour: 'numeric',
 		minute: '2-digit',
 	}).format(new Date(timestamp));
+}
+
+function formatDate(timestamp) {
+	return new Intl.DateTimeFormat(undefined, {
+		dateStyle: 'medium',
+		timeStyle: 'short',
+	}).format(new Date(timestamp));
+}
+
+function escapeHtml(value) {
+	return String(value)
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
 }

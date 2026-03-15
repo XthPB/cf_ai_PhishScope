@@ -1,60 +1,33 @@
 import { describe, expect, it } from 'vitest';
 
-import worker, { ConversationSession } from '../src';
+import worker, { InvestigationCase } from '../src';
 
-describe('Signalboard worker', () => {
-	it('serves the app shell through the assets binding', async () => {
-		const response = await worker.fetch(request('http://example.com/'), createEnv(), createCtx());
+describe('PhishScope worker', () => {
+	it('serves the PhishScope app shell', async () => {
+		const response = await worker.fetch(new Request('http://example.com/'), createEnv(), createCtx());
 
 		expect(response.headers.get('content-type')).toContain('text/html');
-		expect(await response.text()).toContain('Signalboard');
+		expect(await response.text()).toContain('PhishScope');
 	});
 
-	it('reports health metadata', async () => {
-		const response = await worker.fetch(request('http://example.com/api/health'), createEnv(), createCtx());
+	it('reports health metadata and mock modes', async () => {
+		const response = await worker.fetch(new Request('http://example.com/api/health'), createEnv(), createCtx());
 		const payload = (await response.json()) as Record<string, string>;
 
 		expect(response.ok).toBe(true);
 		expect(payload.status).toBe('ok');
+		expect(payload.aiMode).toBe('mock');
+		expect(payload.browserMode).toBe('mock');
 		expect(payload.model).toContain('llama-3.3');
 	});
 
-	it('creates and reloads a session', async () => {
+	it('creates a phishing investigation case with preserved evidence', async () => {
 		const env = createEnv();
-		const createdResponse = await worker.fetch(
-			request('http://example.com/api/sessions', { method: 'POST' }),
-			env,
-			createCtx(),
-		);
-		const created = (await createdResponse.json()) as any;
-
-		expect(createdResponse.ok).toBe(true);
-		expect(created.sessionId).toMatch(/[a-f0-9-]{36}/);
-		expect(created.session.messages).toEqual([]);
-
-		const loadedResponse = await worker.fetch(
-			request(`http://example.com/api/sessions/${created.sessionId}`),
-			env,
-			createCtx(),
-		);
-		const loaded = (await loadedResponse.json()) as any;
-
-		expect(loadedResponse.ok).toBe(true);
-		expect(loaded.session.sessionId).toBe(created.sessionId);
-		expect(loaded.session.board.projectName).toBeTruthy();
-	});
-
-	it('stores a user turn and updates the board in mock mode', async () => {
-		const env = createEnv();
-		const created = (await (
-			await worker.fetch(request('http://example.com/api/sessions', { method: 'POST' }), env, createCtx())
-		).json()) as any;
-
 		const response = await worker.fetch(
-			request(`http://example.com/api/sessions/${created.sessionId}/messages`, {
+			new Request('http://example.com/api/cases', {
 				body: JSON.stringify({
-					message:
-						'Help me scope an AI onboarding assistant for a B2B SaaS product with a three-week deadline and a small team.',
+					analystNote: 'User reported an urgent Microsoft password reset lure.',
+					url: 'https://secure-login-microsoft-example.test',
 				}),
 				headers: { 'content-type': 'application/json' },
 				method: 'POST',
@@ -65,43 +38,96 @@ describe('Signalboard worker', () => {
 		const payload = (await response.json()) as any;
 
 		expect(response.ok).toBe(true);
-		expect(payload.mode).toBe('mock');
-		expect(payload.session.messages).toHaveLength(2);
-		expect(payload.session.messages[0].role).toBe('user');
-		expect(payload.session.messages[1].role).toBe('assistant');
-		expect(payload.session.board.nextActions.length).toBeGreaterThan(0);
-		expect(payload.highlight).toBeTruthy();
+		expect(payload.caseId).toMatch(/[a-f0-9-]{36}/);
+		expect(payload.investigation.scanCount).toBe(1);
+		expect(payload.investigation.assessment.verdict).toBeTruthy();
+		expect(payload.investigation.evidence.screenshotDataUrl).toContain('data:image/');
+		expect(payload.investigation.messages).toHaveLength(2);
+	});
+
+	it('supports follow-up chat and rescans within the same case', async () => {
+		const env = createEnv();
+		const created = (await (
+			await worker.fetch(
+				new Request('http://example.com/api/cases', {
+					body: JSON.stringify({
+						analystNote: 'Potential Cloudflare impersonation lure.',
+						url: 'https://verify-cloudflare-account.example.net',
+					}),
+					headers: { 'content-type': 'application/json' },
+					method: 'POST',
+				}),
+				env,
+				createCtx(),
+			)
+		).json()) as any;
+
+		const followUp = await worker.fetch(
+			new Request(`http://example.com/api/cases/${created.caseId}/messages`, {
+				body: JSON.stringify({
+					message: 'Should we block this indicator immediately?',
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			}),
+			env,
+			createCtx(),
+		);
+		const followUpPayload = (await followUp.json()) as any;
+
+		expect(followUp.ok).toBe(true);
+		expect(followUpPayload.investigation.messages.at(-1).role).toBe('assistant');
+		expect(followUpPayload.investigation.assessment.recommendedAction).toBeTruthy();
+
+		const rescan = await worker.fetch(
+			new Request(`http://example.com/api/cases/${created.caseId}/rescan`, {
+				body: JSON.stringify({
+					analystNote: 'Re-scan after a second user report.',
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			}),
+			env,
+			createCtx(),
+		);
+		const rescanPayload = (await rescan.json()) as any;
+
+		expect(rescan.ok).toBe(true);
+		expect(rescanPayload.investigation.scanCount).toBe(2);
+		expect(rescanPayload.investigation.analystNote).toContain('second user report');
 	});
 });
 
 function createEnv() {
-	const storageById = new Map<string, MockDurableObjectState>();
+	const casesById = new Map<string, MockDurableObjectState>();
 
 	const env: Record<string, any> = {
 		AI: {
 			run: async () => {
-				throw new Error('AI binding is intentionally mocked for local tests.');
+				throw new Error('AI is mocked in unit tests.');
 			},
 		},
 		ASSETS: {
 			fetch: async () =>
-				new Response('<!doctype html><html><head><title>Signalboard</title></head><body>Signalboard</body></html>', {
+				new Response('<!doctype html><html><body>PhishScope</body></html>', {
 					headers: { 'content-type': 'text/html; charset=utf-8' },
 				}),
 		},
+		BROWSER: {},
 		MOCK_AI: 'true',
+		MOCK_BROWSER: 'true',
 	};
 
-	env.SESSIONS = {
+	env.CASES = {
 		get(id: string) {
-			if (!storageById.has(id)) {
-				storageById.set(id, new MockDurableObjectState());
+			if (!casesById.has(id)) {
+				casesById.set(id, new MockDurableObjectState());
 			}
 
-			const state = storageById.get(id)!;
-			const instance = new ConversationSession(state as unknown as DurableObjectState, env as Env);
+			const state = casesById.get(id)!;
+			const instance = new InvestigationCase(state as unknown as DurableObjectState, env as Env);
 			return {
-				fetch: (req: Request) => instance.fetch(req),
+				fetch: (request: Request) => instance.fetch(request),
 			};
 		},
 		idFromName(name: string) {
@@ -119,10 +145,6 @@ function createCtx(): ExecutionContext {
 			return undefined;
 		},
 	};
-}
-
-function request(url: string, init?: RequestInit): Request {
-	return new Request(url, init);
 }
 
 class MockDurableObjectState {
