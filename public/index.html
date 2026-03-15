@@ -21,13 +21,14 @@
 		<div class="app-shell">
 			<header class="topbar">
 				<div class="brand">
-					<p class="eyebrow">Cloudflare phishing investigation console</p>
+					<p class="eyebrow">Cloudflare edge threat operations console</p>
 					<h1>PhishScope</h1>
 				</div>
 				<div class="topbar__meta">
 					<div class="meta-pills">
 						<span id="aiModeBadge" class="status-pill">AI initializing</span>
 						<span id="browserModeBadge" class="status-pill status-pill--quiet">Browser initializing</span>
+						<span id="radarModeBadge" class="status-pill status-pill--quiet">RadarOps loading</span>
 						<span id="turnstileBadge" class="status-pill status-pill--quiet">Intake hardening optional</span>
 					</div>
 					<p id="statusText" class="status-line">Loading dashboard.</p>
@@ -197,6 +198,8 @@
 							<button class="tab-button is-active" data-tab-target="overviewTab" type="button">Overview</button>
 							<button class="tab-button" data-tab-target="evidenceTab" type="button">Evidence</button>
 							<button class="tab-button" data-tab-target="networkTab" type="button">Network</button>
+							<button class="tab-button" data-tab-target="intelTab" type="button">Intel</button>
+							<button class="tab-button" data-tab-target="mitigationTab" type="button">Mitigation</button>
 							<button class="tab-button" data-tab-target="historyTab" type="button">History</button>
 						</div>
 
@@ -232,6 +235,20 @@
 											<p id="captureMeta" class="detail-text">No capture yet</p>
 										</div>
 									</div>
+								</article>
+								<article class="panel-card">
+									<p class="detail-label">RadarOps summary</p>
+									<p id="intelSummaryText" class="summary-text">RadarOps context will appear after the first scan.</p>
+									<div id="intelQuickFacts" class="provenance-list"></div>
+								</article>
+								<article class="panel-card">
+									<p class="detail-label">Mitigation Studio</p>
+									<p id="mitigationSummaryText" class="summary-text">Mitigation drafting will appear after the first assessment.</p>
+									<div id="mitigationQuickFacts" class="provenance-list"></div>
+								</article>
+								<article class="panel-card panel-card--wide">
+									<p class="detail-label">Analyst confidence decomposition</p>
+									<div id="scoreDriversList" class="driver-list"></div>
 								</article>
 							</div>
 
@@ -296,19 +313,23 @@
 									<div id="linkSummaryList" class="provenance-list"></div>
 								</article>
 								<article class="signal-card">
-									<p class="detail-label">Investigation pipeline</p>
+									<p class="detail-label">Operations workflow</p>
 									<div class="pipeline-list">
 										<div class="pipeline-row">
-											<p class="detail-label">Capture</p>
+											<p class="detail-label">Triage</p>
 											<p class="detail-text">Browser Rendering preserves the actual page state and DOM-derived artifacts.</p>
 										</div>
 										<div class="pipeline-row">
-											<p class="detail-label">Assessment</p>
-											<p class="detail-text">Workers AI produces structured verdicts, and fallback heuristics remain deterministic.</p>
+											<p class="detail-label">RadarOps</p>
+											<p class="detail-text">Internet context is attached from Radar URL Scanner when configured, with heuristic fallback otherwise.</p>
+										</div>
+										<div class="pipeline-row">
+											<p class="detail-label">Mitigation</p>
+											<p class="detail-text">Suggested WAF, rate-limit, and Turnstile controls are drafted with rollback steps and human approval gates.</p>
 										</div>
 										<div class="pipeline-row">
 											<p class="detail-label">State</p>
-											<p class="detail-text">Durable Objects retain case memory while the indexed catalog supports case search.</p>
+											<p class="detail-text">Durable Objects retain case memory while the indexed catalog supports case search and review continuity.</p>
 										</div>
 									</div>
 								</article>
@@ -332,6 +353,105 @@
 										</div>
 									</div>
 									<div id="linksList" class="artifact-list"></div>
+								</article>
+							</div>
+						</div>
+
+						<div id="intelTab" class="tab-panel">
+							<div class="overview-grid">
+								<article class="panel-card panel-card--wide">
+									<p class="detail-label">RadarOps narrative</p>
+									<p id="intelContext" class="summary-text">RadarOps context will appear after the first scan.</p>
+									<div class="detail-grid">
+										<div>
+											<p class="detail-label">Source</p>
+											<p id="intelSourceValue" class="detail-text">Unavailable</p>
+										</div>
+										<div>
+											<p class="detail-label">Scan status</p>
+											<p id="intelStatusValue" class="detail-text">Not run</p>
+										</div>
+										<div>
+											<p class="detail-label">Threat category</p>
+											<p id="intelThreatCategoryValue" class="detail-text">Unavailable</p>
+										</div>
+										<div>
+											<p class="detail-label">Confidence</p>
+											<p id="intelConfidenceValue" class="detail-text">LOW</p>
+										</div>
+										<div>
+											<p class="detail-label">Last updated</p>
+											<p id="intelLastUpdatedValue" class="detail-text">N/A</p>
+										</div>
+									</div>
+								</article>
+							</div>
+
+							<div class="signal-grid">
+								<article class="signal-card signal-card--danger">
+									<p class="detail-label">Anomaly signals</p>
+									<ul id="intelSignals"></ul>
+								</article>
+								<article class="signal-card">
+									<p class="detail-label">Recommended checks</p>
+									<ul id="intelChecks"></ul>
+								</article>
+								<article class="signal-card signal-card--wide">
+									<p class="detail-label">Observed findings</p>
+									<div id="intelFindings" class="intel-findings"></div>
+								</article>
+							</div>
+						</div>
+
+						<div id="mitigationTab" class="tab-panel">
+							<div class="overview-grid">
+								<article class="panel-card">
+									<p class="detail-label">Mitigation summary</p>
+									<p id="mitigationModeValue" class="summary-text">Awaiting assessment</p>
+									<div class="detail-grid detail-grid--single">
+										<div>
+											<p class="detail-label">Suggested owner</p>
+											<p id="mitigationOwnerValue" class="detail-text">Security analyst</p>
+										</div>
+										<div>
+											<p class="detail-label">Approval required</p>
+											<p id="mitigationApprovalValue" class="detail-text">Yes</p>
+										</div>
+									</div>
+								</article>
+								<article class="panel-card">
+									<p class="detail-label">Rationale</p>
+									<p id="mitigationRationale" class="summary-text">No mitigation rationale is available yet.</p>
+								</article>
+								<article class="panel-card panel-card--wide">
+									<p class="detail-label">Suggested WAF expression</p>
+									<pre id="mitigationWaf" class="code-block">(not generated yet)</pre>
+								</article>
+							</div>
+
+							<div class="signal-grid">
+								<article class="signal-card">
+									<p class="detail-label">Rate limiting</p>
+									<p id="rateLimitText" class="summary-text">No rate-limit recommendation available yet.</p>
+								</article>
+								<article class="signal-card">
+									<p class="detail-label">Turnstile guidance</p>
+									<p id="turnstileText" class="summary-text">No Turnstile recommendation available yet.</p>
+								</article>
+								<article class="signal-card signal-card--wide">
+									<p class="detail-label">Monitoring</p>
+									<p id="monitoringText" class="summary-text">No monitoring recommendation available yet.</p>
+								</article>
+							</div>
+
+							<div class="history-grid">
+								<article class="panel-card">
+									<p class="detail-label">Rollout steps</p>
+									<ul id="rolloutList" class="step-list"></ul>
+								</article>
+								<article class="panel-card">
+									<p class="detail-label">Rollback steps</p>
+									<ul id="rollbackList" class="step-list"></ul>
 								</article>
 							</div>
 						</div>

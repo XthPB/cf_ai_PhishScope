@@ -4,6 +4,7 @@ import {
 	STORAGE_KEY,
 	buildAssessmentSnapshot,
 	buildEvidenceSnapshot,
+	buildRadarSnapshot,
 	buildTranscript,
 	createCaseEvent,
 	createDefaultAssessment,
@@ -16,7 +17,10 @@ import {
 	normalizeAssessment,
 	normalizeEvidence,
 	normalizeFollowUpTurn,
+	normalizeMitigationPlan,
+	normalizeRadarIntel,
 	normalizeUrl,
+	normalizeScoreDrivers,
 	parseAiResponse,
 	sanitizeText,
 	trimEvents,
@@ -26,7 +30,10 @@ import {
 	type FollowUpTurn,
 	type InvestigationAssessment,
 	type InvestigationState,
+	type MitigationPlan,
+	type RadarIntel,
 	type RenderEvidence,
+	type ScoreDriver,
 } from './shared';
 import { findRelatedCases, getDashboardSummary, listIndexedCases, trackMetric, upsertIndexedCase } from './platform';
 
@@ -41,11 +48,56 @@ interface TurnstileVerificationResponse {
 	success?: boolean;
 }
 
+interface RadarUrlScanSubmissionResponse {
+	result?: {
+		uuid?: string;
+	};
+	success?: boolean;
+}
+
+interface RadarUrlScanReportResponse {
+	result?: {
+		meta?: {
+			processors?: {
+				radarRank?: string | number;
+			};
+		};
+		page?: {
+			asn?: string | number;
+			country?: string;
+			domain?: string;
+			status?: number;
+			title?: string;
+			url?: string;
+		};
+		scan?: {
+			status?: string;
+		};
+		stats?: {
+			ips?: number;
+			requests?: number;
+			urls?: number;
+		};
+		verdicts?: {
+			overall?: {
+				classification?: string;
+				malicious?: boolean;
+			};
+			phishing?: {
+				phishing?: boolean;
+			};
+		};
+	};
+	success?: boolean;
+}
+
 type AppEnv = Env & {
 	ANALYTICS?: AnalyticsEngineDataset;
 	CREATE_LIMITER?: RateLimit;
 	DB?: D1Database;
 	FOLLOWUP_LIMITER?: RateLimit;
+	RADAR_ACCOUNT_ID?: string;
+	RADAR_API_TOKEN?: string;
 	TURNSTILE_SECRET_KEY?: string;
 	TURNSTILE_SITE_KEY?: string;
 };
@@ -140,6 +192,8 @@ export default {
 				features: {
 					analytics: Boolean(env.ANALYTICS),
 					caseIndex: Boolean(env.DB),
+					mitigationStudio: true,
+					radarOps: Boolean(env.RADAR_ACCOUNT_ID && env.RADAR_API_TOKEN),
 					rateLimit: Boolean(env.CREATE_LIMITER && env.FOLLOWUP_LIMITER),
 					scheduledRescans: true,
 					turnstile: Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY),
@@ -244,6 +298,9 @@ export class InvestigationCase implements DurableObject {
 			evidence: analysis.evidence,
 			latestReply: analysis.reply,
 			messages: trimMessages([...investigation.messages, assistantMessage]),
+			mitigation: analysis.mitigation,
+			radar: analysis.radar,
+			scoreDrivers: analysis.scoreDrivers,
 			scanCount: 1,
 			status: deriveCaseStatus(analysis.assessment.verdict),
 			tags: deriveCaseTags(analysis.evidence, analysis.assessment),
@@ -281,6 +338,9 @@ export class InvestigationCase implements DurableObject {
 			evidence: analysis.evidence,
 			latestReply: analysis.reply,
 			messages: trimMessages([...investigation.messages, rescanMessage, assistantMessage]),
+			mitigation: analysis.mitigation,
+			radar: analysis.radar,
+			scoreDrivers: analysis.scoreDrivers,
 			scheduledRescanAt: '',
 			scanCount: investigation.scanCount + 1,
 			status: deriveCaseStatus(analysis.assessment.verdict),
@@ -331,6 +391,19 @@ export class InvestigationCase implements DurableObject {
 			highlight: followUp.highlight,
 			recommendedAction: followUp.recommendedAction,
 		};
+		investigation.scoreDrivers = deriveScoreDrivers(
+			investigation.evidence,
+			investigation.assessment,
+			investigation.analystNote,
+			investigation.radar,
+		);
+		investigation.mitigation = buildMitigationPlan(
+			investigation.targetUrl,
+			investigation.evidence,
+			investigation.assessment,
+			investigation.scoreDrivers,
+			investigation.radar,
+		);
 		investigation.tags = deriveCaseTags(investigation.evidence, investigation.assessment);
 		investigation.timeline = trimEvents([
 			...investigation.timeline,
@@ -410,6 +483,9 @@ export class InvestigationCase implements DurableObject {
 			evidence: analysis.evidence,
 			latestReply: analysis.reply,
 			messages: trimMessages([...investigation.messages, systemMessage]),
+			mitigation: analysis.mitigation,
+			radar: analysis.radar,
+			scoreDrivers: analysis.scoreDrivers,
 			scheduledRescanAt: '',
 			scanCount: investigation.scanCount + 1,
 			status: deriveCaseStatus(analysis.assessment.verdict),
@@ -586,9 +662,25 @@ async function runInvestigation(
 	env: AppEnv,
 	targetUrl: string,
 	analystNote: string,
-): Promise<{ assessment: InvestigationAssessment; evidence: RenderEvidence; reply: string }> {
+): Promise<{
+	assessment: InvestigationAssessment;
+	evidence: RenderEvidence;
+	mitigation: MitigationPlan;
+	radar: RadarIntel;
+	reply: string;
+	scoreDrivers: ScoreDriver[];
+}> {
 	if (shouldUseMockBrowser(env) && shouldUseMockAi(env)) {
-		return createMockInvestigation(targetUrl, analystNote);
+		const mock = createMockInvestigation(targetUrl, analystNote);
+		const radar = await buildRadarIntel(env, targetUrl, mock.evidence, mock.assessment);
+		const scoreDrivers = deriveScoreDrivers(mock.evidence, mock.assessment, analystNote, radar);
+		const mitigation = buildMitigationPlan(targetUrl, mock.evidence, mock.assessment, scoreDrivers, radar);
+		return {
+			...mock,
+			mitigation,
+			radar,
+			scoreDrivers,
+		};
 	}
 
 	const evidence = shouldUseMockBrowser(env)
@@ -597,10 +689,16 @@ async function runInvestigation(
 
 	if (shouldUseMockAi(env)) {
 		const assessment = createFallbackAssessment(evidence, analystNote);
+		const radar = await buildRadarIntel(env, targetUrl, evidence, assessment);
+		const scoreDrivers = deriveScoreDrivers(evidence, assessment, analystNote, radar);
+		const mitigation = buildMitigationPlan(targetUrl, evidence, assessment, scoreDrivers, radar);
 		return {
 			assessment,
 			evidence,
+			mitigation,
+			radar,
 			reply: assessment.executiveSummary,
+			scoreDrivers,
 		};
 	}
 
@@ -622,18 +720,30 @@ async function runInvestigation(
 			temperature: 0.2,
 		});
 		const assessment = normalizeAssessment(parseAiResponse(response), createFallbackAssessment(evidence, analystNote));
+		const radar = await buildRadarIntel(env, targetUrl, evidence, assessment);
+		const scoreDrivers = deriveScoreDrivers(evidence, assessment, analystNote, radar);
+		const mitigation = buildMitigationPlan(targetUrl, evidence, assessment, scoreDrivers, radar);
 		return {
 			assessment,
 			evidence,
+			mitigation,
+			radar,
 			reply: assessment.executiveSummary,
+			scoreDrivers,
 		};
 	} catch (error) {
 		console.warn('Workers AI assessment failed, falling back to heuristic analysis.', error);
 		const assessment = createFallbackAssessment(evidence, analystNote);
+		const radar = await buildRadarIntel(env, targetUrl, evidence, assessment);
+		const scoreDrivers = deriveScoreDrivers(evidence, assessment, analystNote, radar);
+		const mitigation = buildMitigationPlan(targetUrl, evidence, assessment, scoreDrivers, radar);
 		return {
 			assessment,
 			evidence,
+			mitigation,
+			radar,
 			reply: assessment.executiveSummary,
+			scoreDrivers,
 		};
 	}
 }
@@ -658,7 +768,7 @@ async function answerFollowUp(env: AppEnv, investigation: InvestigationState, qu
 				},
 				{
 					role: 'user',
-					content: `Analyst note: ${investigation.analystNote || 'None'}\n\nCurrent assessment JSON:\n${buildAssessmentSnapshot(investigation.assessment)}\n\nEvidence JSON:\n${buildEvidenceSnapshot(investigation.evidence)}\n\nRecent transcript:\n${buildTranscript(investigation.messages)}\n\nNew analyst question: ${question}`,
+					content: `Analyst note: ${investigation.analystNote || 'None'}\n\nCurrent assessment JSON:\n${buildAssessmentSnapshot(investigation.assessment)}\n\nRadarOps JSON:\n${buildRadarSnapshot(investigation.radar)}\n\nEvidence JSON:\n${buildEvidenceSnapshot(investigation.evidence)}\n\nRecent transcript:\n${buildTranscript(investigation.messages)}\n\nNew analyst question: ${question}`,
 				},
 			],
 			max_tokens: 700,
@@ -934,6 +1044,365 @@ function createFallbackAssessment(evidence: RenderEvidence, analystNote: string)
 	});
 }
 
+async function buildRadarIntel(
+	env: AppEnv,
+	targetUrl: string,
+	evidence: RenderEvidence,
+	assessment: InvestigationAssessment,
+): Promise<RadarIntel> {
+	if (!env.RADAR_ACCOUNT_ID || !env.RADAR_API_TOKEN) {
+		return createHeuristicRadarIntel(evidence, assessment);
+	}
+
+	try {
+		const headers = {
+			Authorization: `Bearer ${env.RADAR_API_TOKEN}`,
+			'content-type': 'application/json',
+		};
+		const submitResponse = await fetch(
+			`https://api.cloudflare.com/client/v4/accounts/${env.RADAR_ACCOUNT_ID}/urlscanner/v2/scan`,
+			{
+				body: JSON.stringify({
+					url: targetUrl,
+					visibility: 'unlisted',
+				}),
+				headers,
+				method: 'POST',
+			},
+		);
+		const submitPayload = (await submitResponse.json()) as RadarUrlScanSubmissionResponse;
+		const scanId = sanitizeText(submitPayload.result?.uuid, 120);
+
+		if (!submitResponse.ok || !scanId) {
+			return createHeuristicRadarIntel(evidence, assessment);
+		}
+
+		const reportResponse = await fetch(
+			`https://api.cloudflare.com/client/v4/accounts/${env.RADAR_ACCOUNT_ID}/urlscanner/v2/result/${scanId}`,
+			{
+				headers: {
+					Authorization: `Bearer ${env.RADAR_API_TOKEN}`,
+				},
+			},
+		);
+
+		if (!reportResponse.ok) {
+			return normalizeRadarIntel({
+				anomalySignals: [
+					'Radar URL Scanner accepted the submission, but the report is still being processed.',
+				],
+				confidence: 'low',
+				findings: [
+					{
+						emphasis: 'neutral',
+						label: 'Radar scan id',
+						value: scanId,
+					},
+					{
+						emphasis: 'warning',
+						label: 'Scan state',
+						value: 'Queued',
+					},
+				],
+				lastUpdated: new Date().toISOString(),
+				networkContext: 'The Radar URL scan is queued. Revisit this case later for live Internet enrichment.',
+				recommendedChecks: [
+					'Re-open this case after the Radar URL scan finishes processing.',
+					'Compare the queued URL scan result with the rendered evidence already captured in PhishScope.',
+				],
+				source: 'radar-url-scanner',
+				summary: 'Radar URL Scanner accepted the case URL and queued a report.',
+				threatCategory: 'Queued',
+				urlScanStatus: 'queued',
+			});
+		}
+
+		const reportPayload = (await reportResponse.json()) as RadarUrlScanReportResponse;
+		const result = reportPayload.result || {};
+		const page = result.page || {};
+		const overall = result.verdicts?.overall;
+		const phishing = result.verdicts?.phishing;
+		const classification = sanitizeText(overall?.classification, 80) || 'Unknown';
+		const country = sanitizeText(page.country, 32) || 'Unknown';
+		const asn = String(page.asn || 'Unknown');
+		const radarRank = String(result.meta?.processors?.radarRank || 'Unknown');
+		const requestCount = String(result.stats?.requests || 0);
+		const anomalySignals: string[] = [];
+
+		if (overall?.malicious || phishing?.phishing) {
+			anomalySignals.push('Radar URL Scanner marked the URL as malicious or phishing-oriented.');
+		}
+		if (country !== 'Unknown') {
+			anomalySignals.push(`Radar captured the page from ${country} during URL scan processing.`);
+		}
+		if (page.status && page.status >= 400) {
+			anomalySignals.push(`Radar observed a non-success page status of ${page.status}.`);
+		}
+		if (anomalySignals.length === 0) {
+			anomalySignals.push('Radar URL Scanner completed without adding a stronger anomaly than the current case evidence.');
+		}
+
+		return normalizeRadarIntel({
+			anomalySignals,
+			confidence: overall?.malicious || phishing?.phishing ? 'high' : assessment.confidence,
+			findings: [
+				{
+					emphasis: overall?.malicious || phishing?.phishing ? 'critical' : 'neutral',
+					label: 'Radar classification',
+					value: classification,
+				},
+				{
+					emphasis: 'neutral',
+					label: 'Capture country',
+					value: country,
+				},
+				{
+					emphasis: 'neutral',
+					label: 'Observed ASN',
+					value: asn,
+				},
+				{
+					emphasis: 'neutral',
+					label: 'Radar rank',
+					value: radarRank,
+				},
+				{
+					emphasis: 'warning',
+					label: 'Requests',
+					value: requestCount,
+				},
+			],
+			lastUpdated: new Date().toISOString(),
+			networkContext: `Radar URL Scanner observed ${sanitizeText(page.domain, 120) || evidence.hostname} from ${country} on ASN ${asn}.`,
+			recommendedChecks: [
+				'Compare the Radar classification with the rendered verdict and score decomposition.',
+				'Review the final hostname and redirect behavior before approving any block action.',
+			],
+			source: 'radar-url-scanner',
+			summary:
+				overall?.malicious || phishing?.phishing
+					? 'Radar URL Scanner added high-signal malicious context to this investigation.'
+					: 'Radar URL Scanner completed and provides supporting Internet context for the current case.',
+			threatCategory: classification,
+			urlScanStatus: sanitizeText(result.scan?.status, 64) || 'complete',
+		});
+	} catch (error) {
+		console.warn('Radar URL Scanner enrichment failed, falling back to heuristic intel.', error);
+		return createHeuristicRadarIntel(evidence, assessment);
+	}
+}
+
+function createHeuristicRadarIntel(
+	evidence: RenderEvidence,
+	assessment: InvestigationAssessment,
+): RadarIntel {
+	const anomalySignals: string[] = [];
+	const findings: RadarIntel['findings'] = [];
+
+	if (evidence.redirected) {
+		anomalySignals.push('The URL redirected during rendering, which can indicate staged or conditional delivery.');
+	}
+	if (evidence.hostname.startsWith('xn--')) {
+		anomalySignals.push('The destination host uses punycode, which deserves Internet-level verification.');
+	}
+	if (evidence.topLinks.some((link) => link.classification === 'ip-literal')) {
+		anomalySignals.push('At least one extracted link points to an IP literal destination.');
+	}
+	if (assessment.verdict === 'malicious' || assessment.verdict === 'suspicious') {
+		anomalySignals.push('The local case verdict already suggests this indicator deserves broader threat-intel correlation.');
+	}
+	if (anomalySignals.length === 0) {
+		anomalySignals.push('No broader Internet anomaly was inferred beyond the local evidence set.');
+	}
+
+	findings.push(
+		{
+			emphasis: assessment.verdict === 'malicious' ? 'critical' : assessment.verdict === 'suspicious' ? 'warning' : 'neutral',
+			label: 'Case verdict',
+			value: assessment.verdict,
+		},
+		{
+			emphasis: evidence.redirected ? 'warning' : 'neutral',
+			label: 'Redirected',
+			value: evidence.redirected ? 'Yes' : 'No',
+		},
+		{
+			emphasis: evidence.hostname.startsWith('xn--') ? 'critical' : 'neutral',
+			label: 'Hostname class',
+			value: evidence.hostname.startsWith('xn--') ? 'Punycode' : 'Standard hostname',
+		},
+		{
+			emphasis: evidence.linkSummary.external >= 6 ? 'warning' : 'neutral',
+			label: 'External destinations',
+			value: String(evidence.linkSummary.external),
+		},
+	);
+
+	return normalizeRadarIntel({
+		anomalySignals,
+		confidence: assessment.confidence,
+		findings,
+		lastUpdated: new Date().toISOString(),
+		networkContext:
+			'RadarOps is operating in heuristic mode. The current Internet context is inferred from redirects, host shape, extracted destinations, and the case verdict.',
+		recommendedChecks: [
+			'Connect Radar URL Scanner to attach live Internet context to this case.',
+			'Compare this hostname against other suspicious cases in the queue and the broader incident timeline.',
+		],
+		source: 'heuristic',
+		summary:
+			assessment.verdict === 'malicious' || assessment.verdict === 'suspicious'
+				? 'This case is a good candidate for Radar enrichment because the local evidence already indicates abuse risk.'
+				: 'No direct Radar enrichment is attached, so Internet context is limited to local case-derived signals.',
+		threatCategory:
+			assessment.verdict === 'malicious'
+				? 'Local high-risk signal'
+				: assessment.verdict === 'suspicious'
+					? 'Local elevated signal'
+					: 'No external enrichment',
+		urlScanStatus: 'heuristic',
+	});
+}
+
+function deriveScoreDrivers(
+	evidence: RenderEvidence,
+	assessment: InvestigationAssessment,
+	analystNote: string,
+	radar: RadarIntel,
+): ScoreDriver[] {
+	const drivers: ScoreDriver[] = [];
+	const addDriver = (label: string, impact: number, detail: string) => {
+		drivers.push({ detail, impact, label });
+	};
+	const analystLower = analystNote.toLowerCase();
+	const brandMismatch =
+		assessment.impersonatedBrand !== 'Unknown' &&
+		!hostMatchesVisibleBrand(evidence.hostname, assessment.impersonatedBrand) &&
+		(evidence.forms.some((form) => form.hasPassword) ||
+		 /(verify|password|account|secure|wallet|sign[\s-]?in|otp|mfa|login|reset|billing|unlock)/i.test(
+			`${evidence.requestedUrl} ${evidence.finalUrl} ${evidence.pageTitle} ${evidence.textExcerpt}`,
+		));
+
+	if (evidence.forms.some((form) => form.classification === 'credential' || form.hasPassword)) {
+		addDriver('Credential collection surface', 34, 'Rendered forms include a password or credential-oriented input flow.');
+	}
+	if (brandMismatch) {
+		addDriver('Brand mismatch', 22, `Visible brand cues reference ${assessment.impersonatedBrand}, but the host does not match the expected brand domain.`);
+	}
+	if (evidence.redirected) {
+		addDriver('Redirect chain', 10, 'The request URL redirected before the final rendered page was captured.');
+	}
+	if (evidence.hostname.startsWith('xn--')) {
+		addDriver('Punycode hostname', 18, 'The destination host uses punycode and deserves additional scrutiny.');
+	}
+	if (/\d+\.\d+\.\d+\.\d+/.test(evidence.hostname)) {
+		addDriver('IP literal host', 22, 'The destination hostname is an IP literal rather than a branded domain.');
+	}
+	if (/(verify|secure|login|signin|auth|reset|mfa|otp|wallet|invoice|billing|unlock)/i.test(`${evidence.requestedUrl} ${evidence.finalUrl}`)) {
+		addDriver('Credential-oriented URL terms', 12, 'The URL contains terms commonly associated with verification or authentication lures.');
+	}
+	if (evidence.linkSummary.external >= 6) {
+		addDriver('External-link spread', 8, 'The rendered page points to many external destinations.');
+	}
+	if (isLikelyThirdPartyPlatformHost(evidence.hostname) && !evidence.forms.some((form) => form.hasPassword)) {
+		addDriver('Known third-party platform host', -8, 'The host resembles a common platform domain rather than a direct credential collection host.');
+	}
+	if (assessment.impersonatedBrand !== 'Unknown' && hostMatchesVisibleBrand(evidence.hostname, assessment.impersonatedBrand)) {
+		addDriver('Brand-host alignment', -10, 'The destination hostname aligns with the strongest visible brand hint.');
+	}
+	if (radar.source === 'radar-url-scanner' && /malicious|phishing/i.test(`${radar.threatCategory} ${radar.summary}`)) {
+		addDriver('Radar malicious context', 20, 'Radar URL Scanner added external context consistent with phishing or malicious behavior.');
+	}
+	if (analystLower && /(urgent|invoice|crypto|suspend|mfa|otp|payroll)/i.test(analystLower)) {
+		addDriver('High-risk analyst note', 10, 'The analyst note references urgency, MFA, payroll, or sensitive transaction language.');
+	}
+	if (!evidence.forms.some((form) => form.hasPassword)) {
+		addDriver('No password form observed', -8, 'The rendered page does not show a password collection form.');
+	}
+
+	return normalizeScoreDrivers(
+		drivers.sort((left, right) => Math.abs(right.impact) - Math.abs(left.impact)).slice(0, 6),
+	);
+}
+
+function buildMitigationPlan(
+	targetUrl: string,
+	evidence: RenderEvidence,
+	assessment: InvestigationAssessment,
+	scoreDrivers: ScoreDriver[],
+	radar: RadarIntel,
+): MitigationPlan {
+	const radarHighRisk = radar.source === 'radar-url-scanner' && /phishing|malicious/i.test(`${radar.threatCategory} ${radar.summary}`);
+	const highPositiveDriver = scoreDrivers.some((driver) => driver.impact >= 20);
+	const mode: MitigationPlan['mode'] =
+		assessment.verdict === 'malicious'
+			? 'block'
+			: assessment.verdict === 'suspicious' || assessment.riskScore >= 52 || radarHighRisk || highPositiveDriver
+				? 'review'
+				: 'monitor';
+	const path = extractPathPrefix(targetUrl);
+	const wafExpression =
+		mode === 'block'
+			? `(http.host eq "${evidence.hostname}")`
+			: `(http.host eq "${evidence.hostname}" and http.request.uri.path contains "${path}")`;
+
+	const rolloutSteps =
+		mode === 'block'
+			? [
+					'Require a human approver to validate the URL, host, and evidence package.',
+					'Deploy a scoped WAF rule against the destination host before broader pattern rules.',
+					'Monitor Cloudflare logs and challenge/block counters for 15 minutes after rollout.',
+				]
+			: [
+					'Keep the case in analyst review while validating the destination host and lure context.',
+					'Deploy a challenge or managed rule in simulation mode before enforcing a block.',
+					'Correlate Browser Rendering evidence with Radar and account-side telemetry.',
+				];
+	const rollbackSteps =
+		mode === 'block'
+			? [
+					'Disable the scoped WAF rule if false positives appear on legitimate traffic.',
+					'Restore the previous security action and document the rollback reason in the case timeline.',
+				]
+			: [
+					'Remove the temporary challenge action if the indicator is reclassified as benign.',
+					'Archive the case with the analyst rationale and keep the evidence package for audit history.',
+				];
+	const topDriver = scoreDrivers[0];
+	const radarSignal = radar.source === 'radar-url-scanner' ? ` Radar status: ${radar.urlScanStatus}.` : '';
+
+	return normalizeMitigationPlan({
+		approvalRequired: true,
+		mode,
+		monitoringRecommendation:
+			mode === 'monitor'
+				? 'Keep DNS, HTTP, and challenge telemetry on watch for repeated access to this host.'
+				: 'Track WAF matches, challenge solves, and request volume after rollout to confirm the control is behaving as expected.',
+		rateLimitRecommendation:
+			assessment.verdict === 'malicious' || evidence.forms.some((form) => form.hasPassword)
+				? `Apply a conservative rate limit to ${evidence.hostname} to reduce automated credential attempts while the block decision is reviewed.`
+				: `Use a soft rate-limit or challenge threshold on ${evidence.hostname} only if request volume starts to spike during review.`,
+		rationale:
+			topDriver
+				? `${topDriver.label} is the strongest score driver in the current case.${radarSignal}`
+				: `The current verdict is ${assessment.verdict}, so the control should remain scoped until a human approver signs off.${radarSignal}`,
+		rollbackSteps,
+		rolloutSteps,
+		suggestedOwner: mode === 'block' ? 'Security operations lead' : 'Incident response analyst',
+		summary:
+			mode === 'block'
+				? 'Draft a scoped host-level WAF block with analyst approval before broader production rollout.'
+				: mode === 'review'
+					? 'Prepare a challenge-first mitigation and keep the indicator in human review.'
+					: 'Keep the case in monitoring mode and avoid enforcement until stronger evidence or telemetry arrives.',
+		turnstileRecommendation:
+			evidence.forms.some((form) => form.classification === 'credential' || form.hasPassword)
+				? 'Place Turnstile in front of the credential collection path or equivalent entry form during review.'
+				: 'Turnstile is optional here unless the case evolves into an abuse or sign-up automation pattern.',
+		wafExpression,
+	});
+}
+
 function createMockFollowUp(investigation: InvestigationState, question: string): FollowUpTurn {
 	const lowered = question.toLowerCase();
 	const containsPassword = investigation.evidence.forms.some((form) => form.hasPassword);
@@ -966,13 +1435,19 @@ function hydrateInvestigationState(existing: InvestigationState): InvestigationS
 	const fallback = createInvestigationState(existing.caseId, existing.targetUrl, existing.analystNote);
 	const assessment = normalizeAssessment(existing.assessment, fallback.assessment);
 	const evidence = normalizeEvidence(existing.evidence, fallback.evidence);
+	const radar = normalizeRadarIntel(existing.radar, fallback.radar);
+	const scoreDrivers = normalizeScoreDrivers(existing.scoreDrivers, fallback.scoreDrivers);
+	const mitigation = normalizeMitigationPlan(existing.mitigation, fallback.mitigation);
 
 	return {
 		...fallback,
 		...existing,
 		assessment,
 		evidence,
+		mitigation,
 		messages: trimMessages(existing.messages || []),
+		radar,
+		scoreDrivers,
 		scheduledRescanAt: sanitizeText(existing.scheduledRescanAt, 64),
 		scanCount: Number.isFinite(Number(existing.scanCount)) ? Math.max(0, Number(existing.scanCount)) : fallback.scanCount,
 		status: isCaseStatus(existing.status) ? existing.status : deriveCaseStatus(assessment.verdict),
@@ -1380,6 +1855,20 @@ function hostMatchesVisibleBrand(hostname: string, brand: string): boolean {
 	const allowedSuffixes = suffixesByBrand[brand.toLowerCase()] || [];
 
 	return allowedSuffixes.some((suffix) => normalizedHost === suffix || normalizedHost.endsWith(`.${suffix}`));
+}
+
+function extractPathPrefix(targetUrl: string): string {
+	try {
+		const parsed = new URL(targetUrl);
+		const segments = parsed.pathname
+			.split('/')
+			.map((segment) => segment.trim())
+			.filter(Boolean);
+		const prefix = segments[0] || '';
+		return prefix ? `/${prefix}` : '/';
+	} catch {
+		return '/';
+	}
 }
 
 function isLikelyThirdPartyPlatformHost(hostname: string): boolean {

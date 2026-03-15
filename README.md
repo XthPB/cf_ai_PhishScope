@@ -1,6 +1,6 @@
 # cf_ai_phishscope
 
-PhishScope is an original AI-powered phishing investigation workstation built on Cloudflare. It captures suspicious pages with Browser Rendering, scores them with Workers AI, and stores each investigation in a Durable Object so the analyst can keep asking follow-up questions inside the same case.
+PhishScope is an original AI-powered phishing investigation workstation built on Cloudflare. It captures suspicious pages with Browser Rendering, scores them with Workers AI, attaches optional RadarOps context, drafts mitigation actions, and stores each investigation in a Durable Object so the analyst can keep asking follow-up questions inside the same case.
 
 ## Why this fits the assignment
 
@@ -11,14 +11,15 @@ PhishScope is an original AI-powered phishing investigation workstation built on
 
 ## Product concept
 
-PhishScope is designed like a phishing triage desk rather than a generic chatbot.
+PhishScope is designed like a compact edge threat operations console rather than a generic chatbot.
 
 The analyst:
 
 1. submits a suspicious URL and an optional note
 2. captures visual and structural evidence from the page
-3. receives a structured phishing assessment
-4. continues the investigation with follow-up chat in the same case
+3. receives a structured phishing assessment and score decomposition
+4. reviews RadarOps context and a mitigation draft
+5. continues the investigation with follow-up chat in the same case
 
 Each case preserves:
 
@@ -29,6 +30,9 @@ Each case preserves:
 - extracted forms
 - extracted links
 - suspicious and benign signals
+- score drivers showing what pushed the risk model up or down
+- optional RadarOps findings and recommended checks
+- mitigation plan with WAF, rate-limit, monitoring, and rollback guidance
 - verdict, confidence, risk score, and recommended action
 - analyst note and follow-up conversation
 
@@ -37,6 +41,7 @@ Each case preserves:
 - Cloudflare Worker for API routing and front-end serving
 - Cloudflare Browser Rendering for visual page capture and DOM extraction
 - Cloudflare Workers AI for phishing verdicts and analyst guidance
+- optional Radar URL Scanner enrichment for broader Internet context
 - Cloudflare Durable Objects for per-case persistence and coordination
 - Static asset front-end for the phishing investigation console
 - Vitest for local route and state-flow tests
@@ -73,7 +78,10 @@ Mock mode still demonstrates:
 - case creation
 - persisted investigation memory
 - verdict rendering
+- score decomposition
 - evidence panels
+- RadarOps heuristic context
+- mitigation drafting
 - analyst follow-up chat
 - voice note / voice question UI in supported browsers
 
@@ -105,12 +113,23 @@ npm run dev:remote
 
 This is the recommended way to test live Workers AI and Browser Rendering together.
 
+To enable live RadarOps enrichment as well:
+
+1. add your Cloudflare account id as `RADAR_ACCOUNT_ID` in [`wrangler.jsonc`](./wrangler.jsonc) or via the dashboard
+2. store the Radar token as a Wrangler secret:
+
+```bash
+npx wrangler secret put RADAR_API_TOKEN
+```
+
 In live mode, verify:
 
 - `/api/health` reports `workers-ai` and `browser-rendering`
 - the screenshot panel shows a real page capture
 - the extracted forms and links reflect the rendered page
 - the verdict changes based on the captured evidence
+- the Intel tab shows `Radar URL Scanner` when RadarOps credentials are configured
+- the Mitigation tab drafts containment guidance based on the latest verdict and evidence
 - the same case persists when reloading the case URL
 
 ## Test and validate

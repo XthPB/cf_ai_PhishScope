@@ -21,6 +21,7 @@
 	"vars": {
 		"MOCK_AI": "false",
 		"MOCK_BROWSER": "false",
+		"RADAR_ACCOUNT_ID": "",
 		"TURNSTILE_SITE_KEY": ""
 	},
 	"ai": {
@@ -97,7 +98,8 @@
 	 * Note: Use secrets to store sensitive data.
 	 * https://developers.cloudflare.com/workers/configuration/secrets/
 	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
+	// Store the Radar URL Scanner token as a Wrangler secret:
+	// npx wrangler secret put RADAR_API_TOKEN
 	/**
 	 * Service Bindings (communicate between multiple Workers)
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings

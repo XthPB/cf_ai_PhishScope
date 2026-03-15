@@ -10,6 +10,9 @@ export type CaseStatus = 'triage' | 'monitor' | 'needs_review' | 'escalated';
 export type CaseActor = 'system' | 'analyst' | 'automation';
 export type FormClassification = 'credential' | 'application' | 'search' | 'input' | 'generic';
 export type LinkClassification = 'same-host' | 'same-root' | 'brand-related' | 'external' | 'ip-literal';
+export type IntelSource = 'heuristic' | 'radar-url-scanner';
+export type IntelEmphasis = 'neutral' | 'positive' | 'warning' | 'critical';
+export type MitigationMode = 'monitor' | 'review' | 'block';
 export type Verdict = 'malicious' | 'suspicious' | 'benign' | 'inconclusive';
 
 export interface CaseMessage {
@@ -78,6 +81,45 @@ export interface InvestigationAssessment {
 	verdict: Verdict;
 }
 
+export interface ScoreDriver {
+	detail: string;
+	impact: number;
+	label: string;
+}
+
+export interface RadarFinding {
+	emphasis: IntelEmphasis;
+	label: string;
+	value: string;
+}
+
+export interface RadarIntel {
+	anomalySignals: string[];
+	confidence: Confidence;
+	findings: RadarFinding[];
+	lastUpdated: string;
+	networkContext: string;
+	recommendedChecks: string[];
+	source: IntelSource;
+	summary: string;
+	threatCategory: string;
+	urlScanStatus: string;
+}
+
+export interface MitigationPlan {
+	approvalRequired: boolean;
+	mode: MitigationMode;
+	monitoringRecommendation: string;
+	rateLimitRecommendation: string;
+	rationale: string;
+	rollbackSteps: string[];
+	rolloutSteps: string[];
+	suggestedOwner: string;
+	summary: string;
+	turnstileRecommendation: string;
+	wafExpression: string;
+}
+
 export interface CaseEvent {
 	actor: CaseActor;
 	detail: string;
@@ -89,11 +131,15 @@ export interface CaseEvent {
 
 export interface InvestigationState {
 	analystNote: string;
+	assessment: InvestigationAssessment;
 	caseId: string;
 	createdAt: string;
 	evidence: RenderEvidence;
 	latestReply: string;
 	messages: CaseMessage[];
+	mitigation: MitigationPlan;
+	radar: RadarIntel;
+	scoreDrivers: ScoreDriver[];
 	scheduledRescanAt: string;
 	scanCount: number;
 	status: CaseStatus;
@@ -101,7 +147,6 @@ export interface InvestigationState {
 	targetUrl: string;
 	timeline: CaseEvent[];
 	updatedAt: string;
-	assessment: InvestigationAssessment;
 }
 
 export interface FollowUpTurn {
@@ -135,6 +180,43 @@ export interface DashboardSummary {
 	recentCases: CaseListItem[];
 	totalCases: number;
 	triageCases: number;
+}
+
+export function createDefaultRadarIntel(): RadarIntel {
+	return {
+		anomalySignals: ['No Radar enrichment has been attached to this case yet.'],
+		confidence: 'low',
+		findings: [
+			{
+				emphasis: 'neutral',
+				label: 'Radar source',
+				value: 'No enrichment',
+			},
+		],
+		lastUpdated: new Date().toISOString(),
+		networkContext: 'No Radar URL scan or external Internet context is attached to the current case.',
+		recommendedChecks: ['Run a case scan or connect Radar enrichment to attach broader Internet context.'],
+		source: 'heuristic',
+		summary: 'RadarOps has not enriched this case yet.',
+		threatCategory: 'Unavailable',
+		urlScanStatus: 'not-run',
+	};
+}
+
+export function createDefaultMitigationPlan(): MitigationPlan {
+	return {
+		approvalRequired: true,
+		mode: 'review',
+		monitoringRecommendation: 'Collect render evidence and confirm a verdict before taking mitigation action.',
+		rateLimitRecommendation: 'No rate-limit recommendation is available before the first assessment.',
+		rationale: 'Run a capture before drafting containment or challenge controls.',
+		rollbackSteps: ['No rollback actions are defined because no mitigation has been drafted yet.'],
+		rolloutSteps: ['Run the first scan to generate a mitigation draft.'],
+		suggestedOwner: 'Security analyst',
+		summary: 'Mitigation Studio is waiting for the first assessment.',
+		turnstileRecommendation: 'No Turnstile recommendation is available before the first assessment.',
+		wafExpression: '(not generated yet)',
+	};
 }
 
 export function createDefaultEvidence(targetUrl = ''): RenderEvidence {
@@ -200,6 +282,9 @@ export function createInvestigationState(caseId: string, targetUrl: string, anal
 		evidence: createDefaultEvidence(normalizedUrl),
 		latestReply: 'Submit a suspicious URL to start the investigation.',
 		messages: [],
+		mitigation: createDefaultMitigationPlan(),
+		radar: createDefaultRadarIntel(),
+		scoreDrivers: [],
 		scheduledRescanAt: '',
 		scanCount: 0,
 		status: 'triage',
@@ -316,6 +401,65 @@ export function normalizeAssessment(input: unknown, previous = createDefaultAsse
 	};
 }
 
+export function normalizeRadarIntel(input: unknown, previous = createDefaultRadarIntel()): RadarIntel {
+	const candidate = isRecord(input) ? input : {};
+
+	return {
+		anomalySignals: sanitizeList(candidate.anomalySignals, 180, 6, previous.anomalySignals),
+		confidence: normalizeConfidence(candidate.confidence, previous.confidence),
+		findings: normalizeRadarFindings(candidate.findings, previous.findings),
+		lastUpdated: sanitizeText(candidate.lastUpdated, 64) || previous.lastUpdated,
+		networkContext: sanitizeText(candidate.networkContext, 260) || previous.networkContext,
+		recommendedChecks: sanitizeList(candidate.recommendedChecks, 180, 6, previous.recommendedChecks),
+		source: normalizeIntelSource(candidate.source, previous.source),
+		summary: sanitizeText(candidate.summary, 420) || previous.summary,
+		threatCategory: sanitizeText(candidate.threatCategory, 120) || previous.threatCategory,
+		urlScanStatus: sanitizeText(candidate.urlScanStatus, 64) || previous.urlScanStatus,
+	};
+}
+
+export function normalizeMitigationPlan(input: unknown, previous = createDefaultMitigationPlan()): MitigationPlan {
+	const candidate = isRecord(input) ? input : {};
+
+	return {
+		approvalRequired: typeof candidate.approvalRequired === 'boolean' ? candidate.approvalRequired : previous.approvalRequired,
+		mode: normalizeMitigationMode(candidate.mode, previous.mode),
+		monitoringRecommendation:
+			sanitizeText(candidate.monitoringRecommendation, 220) || previous.monitoringRecommendation,
+		rateLimitRecommendation:
+			sanitizeText(candidate.rateLimitRecommendation, 220) || previous.rateLimitRecommendation,
+		rationale: sanitizeText(candidate.rationale, 420) || previous.rationale,
+		rollbackSteps: sanitizeList(candidate.rollbackSteps, 180, 6, previous.rollbackSteps),
+		rolloutSteps: sanitizeList(candidate.rolloutSteps, 180, 6, previous.rolloutSteps),
+		suggestedOwner: sanitizeText(candidate.suggestedOwner, 120) || previous.suggestedOwner,
+		summary: sanitizeText(candidate.summary, 260) || previous.summary,
+		turnstileRecommendation:
+			sanitizeText(candidate.turnstileRecommendation, 220) || previous.turnstileRecommendation,
+		wafExpression: sanitizeText(candidate.wafExpression, 320) || previous.wafExpression,
+	};
+}
+
+export function normalizeScoreDrivers(input: unknown, fallback: ScoreDriver[] = []): ScoreDriver[] {
+	if (!Array.isArray(input)) {
+		return fallback;
+	}
+
+	const normalized = input
+		.map((entry) => {
+			const candidate = isRecord(entry) ? entry : {};
+			const impact = typeof candidate.impact === 'number' ? candidate.impact : Number(candidate.impact);
+			return {
+				detail: sanitizeText(candidate.detail, 180),
+				impact: Number.isFinite(impact) ? Math.max(-100, Math.min(100, Math.round(impact))) : 0,
+				label: sanitizeText(candidate.label, 80),
+			} satisfies ScoreDriver;
+		})
+		.filter((entry) => entry.label)
+		.slice(0, 8);
+
+	return normalized.length > 0 ? normalized : fallback;
+}
+
 export function normalizeFollowUpTurn(input: unknown): FollowUpTurn {
 	const candidate = isRecord(input) ? input : {};
 
@@ -408,6 +552,24 @@ export function buildAssessmentSnapshot(assessment: InvestigationAssessment): st
 	};
 
 	return JSON.stringify(snapshot, null, 2);
+}
+
+export function buildRadarSnapshot(radar: RadarIntel): string {
+	return JSON.stringify(
+		{
+			anomalySignals: radar.anomalySignals.slice(0, 5),
+			confidence: radar.confidence,
+			findings: radar.findings.slice(0, 5),
+			networkContext: sanitizeText(radar.networkContext, 200),
+			recommendedChecks: radar.recommendedChecks.slice(0, 4),
+			source: radar.source,
+			summary: sanitizeText(radar.summary, 260),
+			threatCategory: radar.threatCategory,
+			urlScanStatus: radar.urlScanStatus,
+		},
+		null,
+		2,
+	);
 }
 
 export function toCaseListItem(investigation: InvestigationState): CaseListItem {
@@ -665,6 +827,50 @@ function normalizeLinkClassification(value: unknown, fallback: LinkClassificatio
 		value === 'external' ||
 		value === 'ip-literal'
 	) {
+		return value;
+	}
+
+	return fallback;
+}
+
+function normalizeIntelSource(value: unknown, fallback: IntelSource): IntelSource {
+	if (value === 'heuristic' || value === 'radar-url-scanner') {
+		return value;
+	}
+
+	return fallback;
+}
+
+function normalizeMitigationMode(value: unknown, fallback: MitigationMode): MitigationMode {
+	if (value === 'monitor' || value === 'review' || value === 'block') {
+		return value;
+	}
+
+	return fallback;
+}
+
+function normalizeRadarFindings(value: unknown, fallback: RadarFinding[]): RadarFinding[] {
+	if (!Array.isArray(value)) {
+		return fallback;
+	}
+
+	const normalized = value
+		.map((entry) => {
+			const candidate = isRecord(entry) ? entry : {};
+			return {
+				emphasis: normalizeIntelEmphasis(candidate.emphasis, 'neutral'),
+				label: sanitizeText(candidate.label, 80),
+				value: sanitizeText(candidate.value, 180),
+			} satisfies RadarFinding;
+		})
+		.filter((entry) => entry.label && entry.value)
+		.slice(0, 8);
+
+	return normalized.length > 0 ? normalized : fallback;
+}
+
+function normalizeIntelEmphasis(value: unknown, fallback: IntelEmphasis): IntelEmphasis {
+	if (value === 'neutral' || value === 'positive' || value === 'warning' || value === 'critical') {
 		return value;
 	}
 

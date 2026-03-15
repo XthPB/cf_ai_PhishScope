@@ -59,25 +59,49 @@ const elements = {
 	formsList: document.getElementById('formsList'),
 	highlightText: document.getElementById('highlightText'),
 	hostValue: document.getElementById('hostValue'),
+	intelChecks: document.getElementById('intelChecks'),
+	intelConfidenceValue: document.getElementById('intelConfidenceValue'),
+	intelContext: document.getElementById('intelContext'),
+	intelFindings: document.getElementById('intelFindings'),
+	intelLastUpdatedValue: document.getElementById('intelLastUpdatedValue'),
+	intelQuickFacts: document.getElementById('intelQuickFacts'),
+	intelSignals: document.getElementById('intelSignals'),
+	intelSourceValue: document.getElementById('intelSourceValue'),
+	intelStatusValue: document.getElementById('intelStatusValue'),
+	intelSummaryText: document.getElementById('intelSummaryText'),
+	intelThreatCategoryValue: document.getElementById('intelThreatCategoryValue'),
 	linkSummaryList: document.getElementById('linkSummaryList'),
 	linksList: document.getElementById('linksList'),
 	messages: document.getElementById('messages'),
+	mitigationApprovalValue: document.getElementById('mitigationApprovalValue'),
+	mitigationModeValue: document.getElementById('mitigationModeValue'),
+	mitigationOwnerValue: document.getElementById('mitigationOwnerValue'),
+	mitigationQuickFacts: document.getElementById('mitigationQuickFacts'),
+	mitigationRationale: document.getElementById('mitigationRationale'),
+	mitigationSummaryText: document.getElementById('mitigationSummaryText'),
+	mitigationWaf: document.getElementById('mitigationWaf'),
+	monitoringText: document.getElementById('monitoringText'),
 	needsReviewMetric: document.getElementById('needsReviewMetric'),
 	noteInput: document.getElementById('noteInput'),
 	noteVoiceButton: document.getElementById('noteVoiceButton'),
 	pageTitle: document.getElementById('pageTitle'),
 	provenanceList: document.getElementById('provenanceList'),
+	radarModeBadge: document.getElementById('radarModeBadge'),
+	rateLimitText: document.getElementById('rateLimitText'),
 	recommendedAction: document.getElementById('recommendedAction'),
 	relatedCasesList: document.getElementById('relatedCasesList'),
 	requestedUrl: document.getElementById('requestedUrl'),
 	rescanButton: document.getElementById('rescanButton'),
 	riskMeterFill: document.getElementById('riskMeterFill'),
 	riskScoreValue: document.getElementById('riskScoreValue'),
+	rollbackList: document.getElementById('rollbackList'),
+	rolloutList: document.getElementById('rolloutList'),
 	scanCountValue: document.getElementById('scanCountValue'),
 	scheduleDelaySelect: document.getElementById('scheduleDelaySelect'),
 	scheduleRescanButton: document.getElementById('scheduleRescanButton'),
 	scheduledRescanValue: document.getElementById('scheduledRescanValue'),
 	screenshotImage: document.getElementById('screenshotImage'),
+	scoreDriversList: document.getElementById('scoreDriversList'),
 	statusText: document.getElementById('statusText'),
 	statusValue: document.getElementById('statusValue'),
 	structuralSignals: document.getElementById('structuralSignals'),
@@ -88,6 +112,7 @@ const elements = {
 	textExcerpt: document.getElementById('textExcerpt'),
 	timelineList: document.getElementById('timelineList'),
 	totalCasesMetric: document.getElementById('totalCasesMetric'),
+	turnstileText: document.getElementById('turnstileText'),
 	turnstileBadge: document.getElementById('turnstileBadge'),
 	turnstileContainer: document.getElementById('turnstileContainer'),
 	turnstileSection: document.getElementById('turnstileSection'),
@@ -416,12 +441,15 @@ function render() {
 function renderHealth() {
 	const aiLive = state.health?.aiMode === 'workers-ai';
 	const browserLive = state.health?.browserMode === 'browser-rendering';
+	const radarLive = Boolean(state.health?.features?.radarOps);
 	const turnstileEnabled = Boolean(state.health?.features?.turnstile);
 
 	elements.aiModeBadge.textContent = aiLive ? 'Workers AI live' : 'Mock AI mode';
 	elements.aiModeBadge.className = `status-pill ${aiLive ? '' : 'status-pill--warning'}`.trim();
 	elements.browserModeBadge.textContent = browserLive ? 'Browser Rendering live' : 'Mock browser mode';
 	elements.browserModeBadge.className = `status-pill ${browserLive ? 'status-pill--quiet' : 'status-pill--warning'}`.trim();
+	elements.radarModeBadge.textContent = radarLive ? 'RadarOps live' : 'RadarOps heuristic';
+	elements.radarModeBadge.className = `status-pill ${radarLive ? '' : 'status-pill--quiet'}`.trim();
 	elements.turnstileBadge.textContent = turnstileEnabled ? 'Turnstile enforced' : 'Intake hardening optional';
 	elements.turnstileBadge.className = `status-pill ${turnstileEnabled ? '' : 'status-pill--quiet'}`.trim();
 	elements.statusText.textContent = state.statusMessage;
@@ -480,6 +508,9 @@ function renderWorkspace() {
 	const investigation = state.investigation;
 	const evidence = investigation?.evidence;
 	const assessment = investigation?.assessment;
+	const radar = investigation?.radar;
+	const mitigation = investigation?.mitigation;
+	const scoreDrivers = investigation?.scoreDrivers || [];
 	const hasCase = Boolean(investigation);
 	const isBusy = Boolean(state.loadingState);
 
@@ -511,15 +542,39 @@ function renderWorkspace() {
 		elements.textExcerpt.textContent = 'No rendered text yet.';
 		elements.screenshotImage.src = PLACEHOLDER_SCREENSHOT;
 		elements.riskMeterFill.style.width = '0%';
+		elements.intelSummaryText.textContent = 'RadarOps context will appear after the first scan.';
+		elements.intelContext.textContent = 'RadarOps context will appear after the first scan.';
+		elements.intelSourceValue.textContent = 'Unavailable';
+		elements.intelStatusValue.textContent = 'Not run';
+		elements.intelThreatCategoryValue.textContent = 'Unavailable';
+		elements.intelConfidenceValue.textContent = 'LOW';
+		elements.intelLastUpdatedValue.textContent = 'N/A';
+		elements.mitigationSummaryText.textContent = 'Mitigation drafting will appear after the first assessment.';
+		elements.mitigationModeValue.textContent = 'Awaiting assessment';
+		elements.mitigationOwnerValue.textContent = 'Security analyst';
+		elements.mitigationApprovalValue.textContent = 'Yes';
+		elements.mitigationRationale.textContent = 'No mitigation rationale is available yet.';
+		elements.mitigationWaf.textContent = '(not generated yet)';
+		elements.rateLimitText.textContent = 'No rate-limit recommendation available yet.';
+		elements.turnstileText.textContent = 'No Turnstile recommendation available yet.';
+		elements.monitoringText.textContent = 'No monitoring recommendation available yet.';
 		renderTextList(elements.suspiciousSignals, ['No suspicious evidence collected yet.']);
 		renderTextList(elements.benignSignals, ['No benign evidence collected yet.']);
 		renderTextList(elements.structuralSignals, ['No structural indicators available yet.']);
 		renderTextList(elements.brandHints, ['No visible brand hints extracted.']);
+		renderTextList(elements.intelSignals, ['No RadarOps anomaly signals attached yet.']);
+		renderTextList(elements.intelChecks, ['Run the first scan to populate RadarOps guidance.']);
 		renderTagList([]);
+		renderScoreDrivers([]);
 		renderProvenanceList([]);
+		renderKeyValueList(elements.intelQuickFacts, [], 'Intel source details will appear after a case scan.');
+		renderKeyValueList(elements.mitigationQuickFacts, [], 'Mitigation quick facts will appear after a case scan.');
 		renderLinkSummary(null);
+		renderIntelFindings([]);
 		renderForms([]);
 		renderLinks([]);
+		renderStepList(elements.rolloutList, [], 'Rollout steps will appear once a mitigation plan exists.');
+		renderStepList(elements.rollbackList, [], 'Rollback steps will appear once a mitigation plan exists.');
 		renderTimeline([]);
 		renderRelatedCases([]);
 		return;
@@ -547,21 +602,70 @@ function renderWorkspace() {
 	elements.textExcerpt.textContent = evidence.textExcerpt || 'No rendered text captured.';
 	elements.screenshotImage.src = evidence.screenshotDataUrl || PLACEHOLDER_SCREENSHOT;
 	elements.riskMeterFill.style.width = `${assessment.riskScore}%`;
+	elements.intelSummaryText.textContent = radar?.summary || 'No RadarOps summary is attached to this case.';
+	elements.intelContext.textContent = radar?.networkContext || 'No RadarOps network context is attached to this case.';
+	elements.intelSourceValue.textContent = formatIntelSource(radar?.source);
+	elements.intelStatusValue.textContent = formatTitleCase(radar?.urlScanStatus || 'not-run');
+	elements.intelThreatCategoryValue.textContent = radar?.threatCategory || 'Unavailable';
+	elements.intelConfidenceValue.textContent = String(radar?.confidence || 'low').toUpperCase();
+	elements.intelLastUpdatedValue.textContent = formatDate(radar?.lastUpdated);
+	elements.mitigationSummaryText.textContent = mitigation?.summary || 'No mitigation summary is attached to this case.';
+	elements.mitigationModeValue.textContent = formatMitigationMode(mitigation?.mode);
+	elements.mitigationOwnerValue.textContent = mitigation?.suggestedOwner || 'Security analyst';
+	elements.mitigationApprovalValue.textContent = mitigation?.approvalRequired ? 'Yes' : 'No';
+	elements.mitigationRationale.textContent = mitigation?.rationale || 'No mitigation rationale is available yet.';
+	elements.mitigationWaf.textContent = mitigation?.wafExpression || '(not generated yet)';
+	elements.rateLimitText.textContent = mitigation?.rateLimitRecommendation || 'No rate-limit recommendation available yet.';
+	elements.turnstileText.textContent = mitigation?.turnstileRecommendation || 'No Turnstile recommendation available yet.';
+	elements.monitoringText.textContent =
+		mitigation?.monitoringRecommendation || 'No monitoring recommendation available yet.';
 
 	renderTextList(elements.suspiciousSignals, assessment.suspiciousSignals);
 	renderTextList(elements.benignSignals, assessment.benignSignals);
 	renderTextList(elements.structuralSignals, evidence.structuralSignals);
 	renderTextList(elements.brandHints, evidence.visibleBrandHints.length ? evidence.visibleBrandHints : ['No visible brand hints extracted.']);
+	renderTextList(elements.intelSignals, radar?.anomalySignals?.length ? radar.anomalySignals : ['No RadarOps anomaly signals attached yet.']);
+	renderTextList(elements.intelChecks, radar?.recommendedChecks?.length ? radar.recommendedChecks : ['No RadarOps follow-up checks were generated.']);
 	renderTagList(investigation.tags);
+	renderScoreDrivers(scoreDrivers);
 	renderProvenanceList([
 		{ label: 'Screenshot SHA-256', value: evidence.hashes?.screenshotSha256 || 'Unavailable' },
 		{ label: 'Text SHA-256', value: evidence.hashes?.textSha256 || 'Unavailable' },
 		{ label: 'Metadata SHA-256', value: evidence.hashes?.metadataSha256 || 'Unavailable' },
 		{ label: 'Redirected', value: evidence.redirected ? 'Yes' : 'No' },
 	]);
+	renderKeyValueList(
+		elements.intelQuickFacts,
+		[
+			{ label: 'Source', value: formatIntelSource(radar?.source) },
+			{ label: 'Status', value: formatTitleCase(radar?.urlScanStatus || 'not-run') },
+			{ label: 'Category', value: radar?.threatCategory || 'Unavailable' },
+		],
+		'Intel source details will appear after a case scan.',
+	);
+	renderKeyValueList(
+		elements.mitigationQuickFacts,
+		[
+			{ label: 'Mode', value: formatMitigationMode(mitigation?.mode) },
+			{ label: 'Owner', value: mitigation?.suggestedOwner || 'Security analyst' },
+			{ label: 'Approval', value: mitigation?.approvalRequired ? 'Required' : 'Not required' },
+		],
+		'Mitigation quick facts will appear after a case scan.',
+	);
 	renderLinkSummary(evidence.linkSummary);
+	renderIntelFindings(radar?.findings || []);
 	renderForms(evidence.forms);
 	renderLinks(evidence.topLinks);
+	renderStepList(
+		elements.rolloutList,
+		mitigation?.rolloutSteps || [],
+		'Rollout steps will appear once a mitigation plan exists.',
+	);
+	renderStepList(
+		elements.rollbackList,
+		mitigation?.rollbackSteps || [],
+		'Rollback steps will appear once a mitigation plan exists.',
+	);
 	renderTimeline(investigation.timeline || []);
 	renderRelatedCases(state.relatedCases);
 }
@@ -642,11 +746,36 @@ function renderTagList(tags) {
 	});
 }
 
-function renderProvenanceList(rows) {
-	elements.provenanceList.replaceChildren();
+function renderScoreDrivers(drivers) {
+	elements.scoreDriversList.replaceChildren();
+
+	if (!drivers.length) {
+		elements.scoreDriversList.append(createEmptyText('Score drivers will appear after the first assessment.'));
+		return;
+	}
+
+	drivers.forEach((driver) => {
+		const row = document.createElement('div');
+		const directionClass = driver.impact >= 0 ? 'driver-row--positive' : 'driver-row--negative';
+		row.className = `driver-row ${directionClass}`;
+		row.innerHTML = `
+			<div class="driver-row__top">
+				<p class="detail-label">${escapeHtml(driver.label)}</p>
+				<span class="driver-impact ${driver.impact >= 0 ? 'driver-impact--positive' : 'driver-impact--negative'}">${escapeHtml(
+					formatImpact(driver.impact),
+				)}</span>
+			</div>
+			<p class="detail-text">${escapeHtml(driver.detail)}</p>
+		`;
+		elements.scoreDriversList.append(row);
+	});
+}
+
+function renderKeyValueList(root, rows, emptyMessage, valueClass = 'detail-text') {
+	root.replaceChildren();
 
 	if (!rows.length) {
-		elements.provenanceList.append(createEmptyText('Evidence provenance will be attached after a render.'));
+		root.append(createEmptyText(emptyMessage));
 		return;
 	}
 
@@ -655,10 +784,19 @@ function renderProvenanceList(rows) {
 		wrapper.className = 'provenance-row';
 		wrapper.innerHTML = `
 			<p class="detail-label">${escapeHtml(row.label)}</p>
-			<p class="detail-text detail-text--mono">${escapeHtml(row.value)}</p>
+			<p class="${escapeHtml(valueClass)}">${escapeHtml(row.value)}</p>
 		`;
-		elements.provenanceList.append(wrapper);
+		root.append(wrapper);
 	});
+}
+
+function renderProvenanceList(rows) {
+	renderKeyValueList(
+		elements.provenanceList,
+		rows,
+		'Evidence provenance will be attached after a render.',
+		'detail-text detail-text--mono',
+	);
 }
 
 function renderLinkSummary(summary) {
@@ -685,6 +823,25 @@ function renderLinkSummary(summary) {
 			<p class="detail-text">${escapeHtml(String(row.value))}</p>
 		`;
 		elements.linkSummaryList.append(wrapper);
+	});
+}
+
+function renderIntelFindings(findings) {
+	elements.intelFindings.replaceChildren();
+
+	if (!findings.length) {
+		elements.intelFindings.append(createEmptyText('RadarOps findings will appear after enrichment is attached.'));
+		return;
+	}
+
+	findings.forEach((finding) => {
+		const row = document.createElement('div');
+		row.className = `intel-finding intel-finding--${finding.emphasis || 'neutral'}`;
+		row.innerHTML = `
+			<p class="detail-label">${escapeHtml(finding.label || 'Finding')}</p>
+			<p class="detail-text">${escapeHtml(finding.value || 'Unavailable')}</p>
+		`;
+		elements.intelFindings.append(row);
 	});
 }
 
@@ -728,6 +885,21 @@ function renderLinks(links) {
 			<p class="artifact-row__mono">${escapeHtml(link.href)}</p>
 		`;
 		elements.linksList.append(row);
+	});
+}
+
+function renderStepList(root, steps, emptyMessage) {
+	root.replaceChildren();
+
+	if (!steps.length) {
+		root.append(createEmptyText(emptyMessage));
+		return;
+	}
+
+	steps.forEach((step) => {
+		const item = document.createElement('li');
+		item.textContent = step;
+		root.append(item);
 	});
 }
 
@@ -980,6 +1152,38 @@ function formatVerdict(verdict) {
 
 function formatStatus(status) {
 	return String(status || 'triage').replace(/_/g, ' ').toUpperCase();
+}
+
+function formatTitleCase(value) {
+	return String(value || '')
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase())
+		.join(' ');
+}
+
+function formatImpact(value) {
+	const amount = Number(value || 0);
+	return `${amount > 0 ? '+' : ''}${amount}`;
+}
+
+function formatIntelSource(source) {
+	if (source === 'radar-url-scanner') {
+		return 'Radar URL Scanner';
+	}
+
+	return 'Heuristic correlation';
+}
+
+function formatMitigationMode(mode) {
+	switch (mode) {
+		case 'block':
+			return 'Block candidate';
+		case 'review':
+			return 'Analyst review';
+		default:
+			return 'Monitor only';
+	}
 }
 
 function formatActor(actor) {

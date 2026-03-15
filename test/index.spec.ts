@@ -28,6 +28,8 @@ describe('PhishScope worker', () => {
 			FOLLOWUP_LIMITER: {
 				limit: vi.fn(async () => ({ success: true })),
 			},
+			RADAR_ACCOUNT_ID: 'acct-123',
+			RADAR_API_TOKEN: 'token-123',
 			TURNSTILE_SECRET_KEY: 'secret',
 			TURNSTILE_SITE_KEY: 'site-key',
 		}), createCtx());
@@ -38,8 +40,10 @@ describe('PhishScope worker', () => {
 		expect(payload.aiMode).toBe('mock');
 		expect(payload.browserMode).toBe('mock');
 		expect(payload.features.rateLimit).toBe(true);
+		expect(payload.features.radarOps).toBe(true);
 		expect(payload.features.scheduledRescans).toBe(true);
 		expect(payload.features.turnstile).toBe(true);
+		expect(payload.features.mitigationStudio).toBe(true);
 		expect(payload.model).toContain('llama-3.3');
 	});
 
@@ -64,6 +68,10 @@ describe('PhishScope worker', () => {
 		expect(payload.investigation.scanCount).toBe(1);
 		expect(payload.investigation.assessment.verdict).toBeTruthy();
 		expect(payload.investigation.evidence.screenshotDataUrl).toContain('data:image/');
+		expect(payload.investigation.scoreDrivers.length).toBeGreaterThan(0);
+		expect(payload.investigation.radar.source).toBe('heuristic');
+		expect(payload.investigation.mitigation.summary).toBeTruthy();
+		expect(payload.investigation.mitigation.wafExpression).toContain('http.host');
 		expect(payload.investigation.messages).toHaveLength(2);
 		expect(payload.relatedCases).toEqual([]);
 		expect(writeDataPoint).toHaveBeenCalledWith(
@@ -98,6 +106,76 @@ describe('PhishScope worker', () => {
 		const cloudflareCases = await requestJson(env, 'http://example.com/api/cases?search=cloudflare');
 		expect(cloudflareCases.response.ok).toBe(true);
 		expect(cloudflareCases.payload.cases.some((item: any) => item.hostname === 'cloudflare.com')).toBe(true);
+	});
+
+	it('attaches RadarOps enrichment when Radar URL Scanner credentials are configured', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+			const url = String(input);
+
+			if (url.endsWith('/urlscanner/v2/scan')) {
+				return new Response(JSON.stringify({
+					result: { uuid: 'scan-123' },
+					success: true,
+				}), {
+					headers: { 'content-type': 'application/json' },
+				});
+			}
+
+			if (url.endsWith('/urlscanner/v2/result/scan-123')) {
+				return new Response(JSON.stringify({
+					result: {
+						meta: {
+							processors: {
+								radarRank: 321,
+							},
+						},
+						page: {
+							asn: 64512,
+							country: 'US',
+							domain: 'secure-login-microsoft-example.test',
+							status: 200,
+						},
+						scan: {
+							status: 'complete',
+						},
+						stats: {
+							requests: 9,
+						},
+						verdicts: {
+							overall: {
+								classification: 'phishing',
+								malicious: true,
+							},
+							phishing: {
+								phishing: true,
+							},
+						},
+					},
+					success: true,
+				}), {
+					headers: { 'content-type': 'application/json' },
+				});
+			}
+
+			throw new Error(`Unexpected fetch: ${url}`);
+		});
+
+		const env = createEnv({
+			RADAR_ACCOUNT_ID: 'acct-123',
+			RADAR_API_TOKEN: 'token-123',
+		});
+		const created = await createCase(env, {
+			analystNote: 'Potential Microsoft credential lure.',
+			url: 'https://secure-login-microsoft-example.test',
+		});
+
+		expect(created.response.ok).toBe(true);
+		expect(created.payload.investigation.radar.source).toBe('radar-url-scanner');
+		expect(created.payload.investigation.radar.urlScanStatus).toBe('complete');
+		expect(created.payload.investigation.radar.threatCategory).toBe('phishing');
+		expect(created.payload.investigation.scoreDrivers.some((driver: any) => driver.label === 'Radar malicious context')).toBe(true);
+		expect(created.payload.investigation.mitigation.mode).toBe('review');
+		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
 	it('supports follow-up chat and rescans within the same case', async () => {
