@@ -269,39 +269,95 @@ textarea:focus {
 	flex-wrap: wrap;
 }
 
+.button-row--compact {
+	justify-content: flex-end;
+}
+
 .button {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	min-height: 48px;
+	padding: 0 18px;
 	border-radius: 999px;
-	padding: 11px 16px;
-	border: 1px solid transparent;
+	border: 1px solid rgba(134, 163, 184, 0.18);
+	background: linear-gradient(180deg, rgba(19, 32, 49, 0.96), rgba(9, 17, 28, 0.96));
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.05),
+		0 14px 28px rgba(2, 8, 16, 0.26);
+	color: var(--text);
 	cursor: pointer;
-	transition: background 160ms ease, border-color 160ms ease, opacity 160ms ease, transform 160ms ease;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	transition:
+		background 180ms ease,
+		border-color 180ms ease,
+		box-shadow 180ms ease,
+		opacity 160ms ease,
+		transform 160ms ease;
+	overflow: hidden;
+}
+
+.button::before {
+	content: '';
+	position: absolute;
+	inset: 1px;
+	border-radius: inherit;
+	background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 38%);
+	opacity: 0.9;
+	pointer-events: none;
 }
 
 .button:hover:not(:disabled) {
 	transform: translateY(-1px);
+	border-color: rgba(96, 165, 250, 0.28);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.07),
+		0 18px 34px rgba(2, 8, 16, 0.32);
 }
 
 .button:disabled {
 	opacity: 0.58;
 	cursor: not-allowed;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.03),
+		0 8px 16px rgba(2, 8, 16, 0.16);
+}
+
+.button--compact {
+	min-height: 42px;
+	padding: 0 14px;
+	font-size: 0.92rem;
 }
 
 .button--primary {
-	background: linear-gradient(135deg, #2284ff, #3268d9);
+	border-color: rgba(88, 157, 255, 0.34);
+	background: linear-gradient(135deg, #2d8fff 0%, #2d6ff4 52%, #1d5fd5 100%);
 	color: white;
-	box-shadow: 0 12px 24px rgba(50, 104, 217, 0.24);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.14),
+		0 18px 32px rgba(36, 96, 204, 0.34);
 }
 
 .button--secondary {
-	background: rgba(26, 66, 109, 0.66);
-	border-color: rgba(74, 168, 255, 0.16);
-	color: #d5e7ff;
+	border-color: rgba(94, 165, 255, 0.22);
+	background: linear-gradient(180deg, rgba(24, 70, 118, 0.92), rgba(14, 45, 79, 0.96));
+	color: #dcecff;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.08),
+		0 14px 28px rgba(10, 32, 60, 0.28);
 }
 
 .button--ghost {
-	background: transparent;
+	background: linear-gradient(180deg, rgba(12, 20, 32, 0.92), rgba(7, 13, 22, 0.92));
 	border-color: var(--border);
 	color: var(--text);
+}
+
+.button--ghost:hover:not(:disabled) {
+	border-color: rgba(134, 163, 184, 0.26);
 }
 
 .turnstile-section {
@@ -320,11 +376,23 @@ textarea:focus {
 	display: grid;
 	grid-template-columns: 1.1fr 0.9fr;
 	gap: 10px;
-	margin-bottom: 12px;
 }
 
 .filter-grid .field:last-child {
 	grid-column: 1 / -1;
+}
+
+.filter-stack {
+	display: grid;
+	gap: 12px;
+}
+
+.filter-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding-top: 2px;
 }
 
 .case-list {
@@ -439,17 +507,26 @@ textarea:focus {
 	gap: 10px;
 	flex-wrap: wrap;
 	justify-content: flex-end;
+	align-items: center;
 }
 
 .schedule-inline {
 	display: flex;
 	gap: 8px;
 	align-items: center;
+	padding: 4px;
+	border: 1px solid rgba(134, 163, 184, 0.12);
+	border-radius: 999px;
+	background: rgba(8, 17, 28, 0.7);
 }
 
 .schedule-inline select {
 	width: auto;
 	min-width: 130px;
+	min-height: 40px;
+	padding-block: 8px;
+	border-radius: 999px;
+	background: rgba(5, 12, 21, 0.86);
 }
 
 .workspace-metrics {
@@ -471,18 +548,28 @@ textarea:focus {
 }
 
 .tab-button {
-	border: 1px solid var(--border);
-	background: rgba(11, 24, 39, 0.68);
+	border: 1px solid rgba(134, 163, 184, 0.16);
+	background: linear-gradient(180deg, rgba(12, 22, 35, 0.88), rgba(8, 15, 25, 0.92));
 	color: var(--text-soft);
-	padding: 10px 14px;
+	padding: 11px 16px;
 	border-radius: 999px;
 	cursor: pointer;
+	font-weight: 500;
+	transition: border-color 180ms ease, background 180ms ease, transform 160ms ease;
+}
+
+.tab-button:hover {
+	transform: translateY(-1px);
+	border-color: rgba(96, 165, 250, 0.24);
 }
 
 .tab-button.is-active {
-	border-color: rgba(74, 168, 255, 0.28);
-	background: rgba(26, 66, 109, 0.72);
+	border-color: rgba(74, 168, 255, 0.32);
+	background: linear-gradient(180deg, rgba(32, 83, 136, 0.94), rgba(18, 53, 93, 0.96));
 	color: #e6f2ff;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.08),
+		0 14px 28px rgba(8, 27, 51, 0.3);
 }
 
 .tab-panel {
@@ -706,11 +793,18 @@ textarea:focus {
 	width: 100%;
 	text-align: left;
 	border-radius: var(--radius-md);
-	border: 1px solid var(--border);
-	background: rgba(10, 24, 40, 0.74);
+	border: 1px solid rgba(134, 163, 184, 0.16);
+	background: linear-gradient(180deg, rgba(12, 26, 42, 0.9), rgba(7, 15, 25, 0.94));
 	color: var(--text);
 	padding: 13px 14px;
 	cursor: pointer;
+	transition: border-color 180ms ease, background 180ms ease, transform 160ms ease;
+}
+
+.follow-up__button:hover {
+	transform: translateY(-1px);
+	border-color: rgba(96, 165, 250, 0.24);
+	background: linear-gradient(180deg, rgba(15, 33, 54, 0.94), rgba(9, 18, 31, 0.96));
 }
 
 .messages {
@@ -816,8 +910,22 @@ textarea:focus {
 		grid-template-columns: 1fr;
 	}
 
+	.filter-actions {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.button-row--compact {
+		justify-content: stretch;
+	}
+
+	.button-row--compact .button {
+		flex: 1 1 0;
+	}
+
 	.schedule-inline {
 		width: 100%;
+		flex-wrap: wrap;
 	}
 
 	.schedule-inline select,

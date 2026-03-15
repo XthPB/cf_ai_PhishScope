@@ -101,32 +101,41 @@
 							<p id="caseListCount" class="caption">0 cases</p>
 						</div>
 
-						<div class="filter-grid">
-							<label class="field field--compact" for="caseSearchInput">
-								<span>Search</span>
-								<input id="caseSearchInput" type="search" placeholder="Hostname, brand, summary" />
-							</label>
-							<label class="field field--compact" for="caseVerdictFilter">
-								<span>Verdict</span>
-								<select id="caseVerdictFilter">
-									<option value="all">All verdicts</option>
-									<option value="malicious">Malicious</option>
-									<option value="suspicious">Suspicious</option>
-									<option value="inconclusive">Inconclusive</option>
-									<option value="benign">Benign</option>
-								</select>
-							</label>
-							<label class="field field--compact" for="caseStatusFilter">
-								<span>Status</span>
-								<select id="caseStatusFilter">
-									<option value="all">All statuses</option>
-									<option value="escalated">Escalated</option>
-									<option value="needs_review">Needs review</option>
-									<option value="triage">Triage</option>
-									<option value="monitor">Monitor</option>
-								</select>
-							</label>
-						</div>
+						<form id="caseFilterForm" class="filter-stack">
+							<div class="filter-grid">
+								<label class="field field--compact" for="caseSearchInput">
+									<span>Search</span>
+									<input id="caseSearchInput" type="search" placeholder="Hostname, brand, summary" />
+								</label>
+								<label class="field field--compact" for="caseVerdictFilter">
+									<span>Verdict</span>
+									<select id="caseVerdictFilter">
+										<option value="all">All verdicts</option>
+										<option value="malicious">Malicious</option>
+										<option value="suspicious">Suspicious</option>
+										<option value="inconclusive">Inconclusive</option>
+										<option value="benign">Benign</option>
+									</select>
+								</label>
+								<label class="field field--compact" for="caseStatusFilter">
+									<span>Status</span>
+									<select id="caseStatusFilter">
+										<option value="all">All statuses</option>
+										<option value="escalated">Escalated</option>
+										<option value="needs_review">Needs review</option>
+										<option value="triage">Triage</option>
+										<option value="monitor">Monitor</option>
+									</select>
+								</label>
+							</div>
+							<div class="filter-actions">
+								<p class="hint">Press Apply or hit Enter to refresh the queue.</p>
+								<div class="button-row button-row--compact">
+									<button id="caseFilterResetButton" class="button button--ghost button--compact" type="button">Reset</button>
+									<button id="caseFilterApplyButton" class="button button--secondary button--compact" type="submit">Apply filters</button>
+								</div>
+							</div>
+						</form>
 
 						<div id="caseList" class="case-list"></div>
 					</section>

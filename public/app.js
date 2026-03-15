@@ -1,5 +1,4 @@
 const STORAGE_KEY = 'phishscope-active-case';
-const SEARCH_DEBOUNCE_MS = 200;
 const PLACEHOLDER_SCREENSHOT =
 	'data:image/svg+xml;base64,' +
 	btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" fill="none">
@@ -24,7 +23,6 @@ const state = {
 	pendingMessage: null,
 	recognition: null,
 	relatedCases: [],
-	searchTimer: null,
 	statusMessage: 'Loading dashboard.',
 	turnstileToken: '',
 	turnstileWidgetId: null,
@@ -43,6 +41,9 @@ const elements = {
 	caseLabel: document.getElementById('caseLabel'),
 	caseList: document.getElementById('caseList'),
 	caseListCount: document.getElementById('caseListCount'),
+	caseFilterApplyButton: document.getElementById('caseFilterApplyButton'),
+	caseFilterForm: document.getElementById('caseFilterForm'),
+	caseFilterResetButton: document.getElementById('caseFilterResetButton'),
 	caseSearchInput: document.getElementById('caseSearchInput'),
 	caseStatusFilter: document.getElementById('caseStatusFilter'),
 	caseVerdictFilter: document.getElementById('caseVerdictFilter'),
@@ -268,26 +269,27 @@ function bindEvents() {
 		}
 	});
 
-	elements.caseSearchInput.addEventListener('input', () => {
-		window.clearTimeout(state.searchTimer);
-		state.searchTimer = window.setTimeout(() => {
-			refreshCaseList().catch((error) => {
-				console.error(error);
-				setStatus(error.message || 'Case search failed.');
-			});
-		}, SEARCH_DEBOUNCE_MS);
-	});
-	elements.caseStatusFilter.addEventListener('change', () => {
-		refreshCaseList().catch((error) => {
+	elements.caseFilterForm.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		try {
+			await refreshCaseList();
+			setStatus('Applied queue filters.');
+		} catch (error) {
 			console.error(error);
 			setStatus(error.message || 'Case filter failed.');
-		});
+		}
 	});
-	elements.caseVerdictFilter.addEventListener('change', () => {
-		refreshCaseList().catch((error) => {
+	elements.caseFilterResetButton.addEventListener('click', async () => {
+		elements.caseSearchInput.value = '';
+		elements.caseVerdictFilter.value = 'all';
+		elements.caseStatusFilter.value = 'all';
+		try {
+			await refreshCaseList();
+			setStatus('Cleared queue filters.');
+		} catch (error) {
 			console.error(error);
-			setStatus(error.message || 'Case filter failed.');
-		});
+			setStatus(error.message || 'Queue reset failed.');
+		}
 	});
 
 	elements.caseList.addEventListener('click', async (event) => {
@@ -929,6 +931,8 @@ function setLoading(nextState) {
 	state.loadingState = nextState;
 	const isLoading = Boolean(nextState);
 	elements.analyzeButton.disabled = isLoading;
+	elements.caseFilterApplyButton.disabled = isLoading;
+	elements.caseFilterResetButton.disabled = isLoading;
 	elements.rescanButton.disabled = !state.investigation || isLoading;
 	elements.scheduleRescanButton.disabled = !state.investigation || isLoading;
 	elements.chatSendButton.disabled = !state.investigation || isLoading;
