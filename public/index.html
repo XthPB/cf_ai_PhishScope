@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Signalboard | Cloudflare AI Strategy Copilot</title>
+		<meta
+			name="description"
+			content="Signalboard is a stateful Cloudflare AI app with Workers AI, Durable Object memory, and chat or voice input."
+		/>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap"
+			rel="stylesheet"
+		/>
+		<link rel="stylesheet" href="/styles.css" />
+	</head>
+	<body>
+		<div class="shell">
+			<header class="hero">
+				<div class="hero__copy">
+					<p class="eyebrow">Cloudflare AI Assignment Build</p>
+					<h1>Signalboard</h1>
+					<p class="lede">
+						A stateful strategy copilot that turns rough product ideas into a working plan. It uses Workers AI for
+						reasoning, a Durable Object for memory, and supports chat plus browser voice input.
+					</p>
+				</div>
+				<div class="hero__meta">
+					<span id="modeBadge" class="status-pill">Initializing</span>
+					<span id="voiceSupportLabel" class="status-pill status-pill--quiet">Voice detection pending</span>
+				</div>
+			</header>
+
+			<div class="layout">
+				<aside class="sidebar">
+					<section class="panel panel--accent">
+						<div class="panel__heading">
+							<div>
+								<p class="panel__eyebrow">Session</p>
+								<h2>Review-ready demo</h2>
+							</div>
+							<p id="sessionLabel" class="session-label">No session yet</p>
+						</div>
+						<div class="button-row">
+							<button id="newSessionButton" class="button button--secondary" type="button">New Session</button>
+							<button id="copyLinkButton" class="button button--ghost" type="button">Copy Link</button>
+						</div>
+						<div class="button-row">
+							<button id="resetButton" class="button button--ghost" type="button">Reset Board</button>
+						</div>
+						<p id="statusText" class="hint">Creating a session and loading the board.</p>
+					</section>
+
+					<section class="panel">
+						<div class="panel__heading">
+							<div>
+								<p class="panel__eyebrow">Starter Prompts</p>
+								<h2>Try a strong scenario</h2>
+							</div>
+						</div>
+						<div id="promptGrid" class="prompt-grid"></div>
+					</section>
+
+					<section class="panel">
+						<div class="panel__heading">
+							<div>
+								<p class="panel__eyebrow">Assignment Fit</p>
+								<h2>What this app demonstrates</h2>
+							</div>
+						</div>
+						<ul class="feature-list">
+							<li>Workers AI with Llama 3.3 for structured planning responses.</li>
+							<li>Durable Object-backed session memory and a persistent strategy board.</li>
+							<li>Chat input plus optional browser voice dictation for faster capture.</li>
+							<li>Static asset front-end served directly from Cloudflare.</li>
+						</ul>
+					</section>
+				</aside>
+
+				<main class="main">
+					<section class="panel panel--conversation">
+						<div class="panel__heading">
+							<div>
+								<p class="panel__eyebrow">Conversation</p>
+								<h2>Context in, plan out</h2>
+							</div>
+							<p class="caption">Shift+Enter for a newline</p>
+						</div>
+
+						<div id="messages" class="messages" aria-live="polite"></div>
+						<div id="typing" class="typing" hidden>
+							<span></span>
+							<span></span>
+							<span></span>
+							<p>Thinking through the board update...</p>
+						</div>
+
+						<form id="composerForm" class="composer">
+							<label class="composer__field" for="messageInput">
+								<span>Describe the initiative, constraint, or risk you want help with.</span>
+								<textarea
+									id="messageInput"
+									name="message"
+									rows="4"
+									placeholder="Example: I need a launch plan for an AI support agent for Shopify merchants, with a two-week deadline and no backend team."
+								></textarea>
+							</label>
+							<div class="composer__actions">
+								<button id="voiceButton" class="button button--ghost" type="button">Voice Input</button>
+								<button id="sendButton" class="button button--primary" type="submit">Send</button>
+							</div>
+						</form>
+					</section>
+
+					<section class="panel panel--board">
+						<div class="panel__heading">
+							<div>
+								<p class="panel__eyebrow">Memory Board</p>
+								<h2>Persistent state</h2>
+							</div>
+							<p id="boardHighlight" class="highlight">Waiting for the first turn.</p>
+						</div>
+
+						<div class="board-grid">
+							<article class="board-card">
+								<p class="board-card__label">Project</p>
+								<h3 id="boardProject">Untitled initiative</h3>
+							</article>
+							<article class="board-card">
+								<p class="board-card__label">Objective</p>
+								<p id="boardObjective"></p>
+							</article>
+							<article class="board-card">
+								<p class="board-card__label">Audience</p>
+								<p id="boardAudience"></p>
+							</article>
+							<article class="board-card">
+								<p class="board-card__label">Tone</p>
+								<p id="boardTone"></p>
+							</article>
+							<article class="board-card">
+								<p class="board-card__label">Confidence</p>
+								<p id="boardConfidence"></p>
+							</article>
+							<article class="board-card board-card--list">
+								<p class="board-card__label">Constraints</p>
+								<ul id="boardConstraints"></ul>
+							</article>
+							<article class="board-card board-card--list">
+								<p class="board-card__label">Risks</p>
+								<ul id="boardRisks"></ul>
+							</article>
+							<article class="board-card board-card--list">
+								<p class="board-card__label">Next actions</p>
+								<ul id="boardNextActions"></ul>
+							</article>
+						</div>
+
+						<div class="follow-up">
+							<div class="panel__heading panel__heading--tight">
+								<div>
+									<p class="panel__eyebrow">Suggested Next Questions</p>
+								</div>
+							</div>
+							<div id="followUps" class="follow-up__list"></div>
+						</div>
+					</section>
+				</main>
+			</div>
+		</div>
+
+		<script type="module" src="/app.js"></script>
+	</body>
+</html>
