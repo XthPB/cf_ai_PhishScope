@@ -104,6 +104,7 @@ const FOLLOW_UP_SYSTEM_PROMPT = `You are PhishScope, a phishing investigation co
 Rules:
 - Answer using the case evidence, existing verdict, analyst note, and recent transcript.
 - Do not invent telemetry you were not given.
+- If the analyst asks about traffic sources, referrers, campaign origin, visitor analytics, or other telemetry not present in the case evidence, say that directly and ask for the relevant logs or analytics instead of guessing.
 - Provide short, analyst-facing reasoning.
 - If the analyst asks for an action, recommend block, monitor, rescan, or human review as appropriate.`;
 
@@ -420,6 +421,11 @@ async function runInvestigation(
 }
 
 async function answerFollowUp(env: AppEnv, investigation: InvestigationState, question: string): Promise<FollowUpTurn> {
+	const telemetryGuardrail = createUnsupportedTelemetryFollowUp(investigation, question);
+	if (telemetryGuardrail) {
+		return telemetryGuardrail;
+	}
+
 	if (shouldUseMockAi(env)) {
 		return createMockFollowUp(investigation, question);
 	}
@@ -718,6 +724,29 @@ function createMockFollowUp(investigation: InvestigationState, question: string)
 	});
 }
 
+function createUnsupportedTelemetryFollowUp(
+	investigation: InvestigationState,
+	question: string,
+): FollowUpTurn | null {
+	if (!isUnsupportedTelemetryQuestion(question)) {
+		return null;
+	}
+
+	return normalizeFollowUpTurn({
+		analystQuestions: [
+			'Do you want to review the rendered links and page copy instead of unavailable traffic telemetry?',
+			'Should this case be correlated with referrer, CDN, or marketing analytics outside PhishScope?',
+			'Do you want a verdict based only on the captured page evidence and hostname context?',
+		],
+		highlight:
+			'The current case includes rendered page evidence, outbound links, and page structure, but not inbound traffic or referrer telemetry.',
+		reply:
+			'The major traffic sources cannot be determined from the current case evidence. This investigation includes rendered page content, forms, links, and hostname context, but it does not include referrers, campaign metadata, visitor analytics, or inbound traffic logs. Use external analytics, referrer logs, or edge telemetry if you need source attribution.',
+		recommendedAction:
+			'Correlate this case with analytics, referrer logs, or HTTP traffic telemetry before making claims about traffic sources or campaign origin.',
+	});
+}
+
 function detectStructuralSignals(
 	requestedUrl: string,
 	finalUrl: string,
@@ -779,6 +808,39 @@ function inferBrandFromEvidence(evidence: RenderEvidence): string {
 	}
 
 	return 'Unknown';
+}
+
+function isUnsupportedTelemetryQuestion(question: string): boolean {
+	const lowered = question.toLowerCase();
+
+	const trafficPatterns = [
+		/\btraffic source\b/,
+		/\btraffic sources\b/,
+		/\bsource of traffic\b/,
+		/\bvisitor source\b/,
+		/\bvisitor sources\b/,
+		/\breferrer\b/,
+		/\breferrers\b/,
+		/\breferral traffic\b/,
+		/\bcampaign origin\b/,
+		/\bsource\/medium\b/,
+		/\butm\b/,
+	];
+
+	const analyticsPatterns = [
+		/\banalytics\b/,
+		/\bvisitor count\b/,
+		/\bvisitors\b/,
+		/\bpageviews\b/,
+		/\bpage views\b/,
+		/\bimpressions\b/,
+		/\bclick[- ]through\b/,
+		/\bctr\b/,
+		/\bconversion\b/,
+		/\bacquisition\b/,
+	];
+
+	return trafficPatterns.some((pattern) => pattern.test(lowered)) || analyticsPatterns.some((pattern) => pattern.test(lowered));
 }
 
 function hostMatchesVisibleBrand(hostname: string, brand: string): boolean {

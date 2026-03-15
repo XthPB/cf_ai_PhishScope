@@ -98,6 +98,43 @@ describe('PhishScope worker', () => {
 		expect(rescanPayload.investigation.analystNote).toContain('second user report');
 	});
 
+	it('refuses to guess unsupported traffic-source telemetry in follow-up answers', async () => {
+		const env = createEnv();
+		const created = (await (
+			await worker.fetch(
+				new Request('http://example.com/api/cases', {
+					body: JSON.stringify({
+						url: 'https://job-boards.greenhouse.io/cloudflare/jobs/7296929?gh_jid=7296929',
+					}),
+					headers: { 'content-type': 'application/json' },
+					method: 'POST',
+				}),
+				env,
+				createCtx(),
+			)
+		).json()) as any;
+
+		const followUp = await worker.fetch(
+			new Request(`http://example.com/api/cases/${created.caseId}/messages`, {
+				body: JSON.stringify({
+					message: 'Can you identify the major traffic sources on this page?',
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST',
+			}),
+			env,
+			createCtx(),
+		);
+		const followUpPayload = (await followUp.json()) as any;
+		const latestReply = followUpPayload.investigation.messages.at(-1).content as string;
+
+		expect(followUp.ok).toBe(true);
+		expect(latestReply).toContain('cannot be determined');
+		expect(latestReply).toContain('referrers');
+		expect(latestReply).not.toContain('Greenhouse');
+		expect(followUpPayload.investigation.assessment.recommendedAction).toContain('analytics');
+	});
+
 	it('builds compact AI snapshots without embedding the screenshot payload', () => {
 		const evidence = {
 			...createDefaultEvidence('https://example.com'),
