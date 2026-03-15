@@ -125,6 +125,7 @@ Rules:
 - Answer using the case evidence, existing verdict, analyst note, and recent transcript.
 - Do not invent telemetry you were not given.
 - If the analyst asks about traffic sources, referrers, campaign origin, visitor analytics, or other telemetry not present in the case evidence, say that directly and ask for the relevant logs or analytics instead of guessing.
+- If the analyst asks for WHOIS, registrant history, passive DNS, DNS history, reputation feeds, certificate transparency, or other external enrichment that is not present in the case evidence, say that directly and ask for that lookup instead of implying you already have it.
 - Provide short, analyst-facing reasoning.
 - If the analyst asks for an action, recommend block, monitor, rescan, or human review as appropriate.`;
 
@@ -1194,8 +1195,26 @@ function createUnsupportedTelemetryFollowUp(
 	investigation: InvestigationState,
 	question: string,
 ): FollowUpTurn | null {
-	if (!isUnsupportedTelemetryQuestion(question)) {
+	const unsupportedEvidenceGap = getUnsupportedEvidenceGap(question);
+	if (!unsupportedEvidenceGap) {
 		return null;
+	}
+
+	if (unsupportedEvidenceGap === 'registration') {
+		const hostname = investigation.evidence.hostname || investigation.targetUrl;
+		return normalizeFollowUpTurn({
+			analystQuestions: [
+				'Do you want the case disposition based only on the rendered page evidence and hostname context?',
+				'Should this hostname be enriched with WHOIS, passive DNS, or certificate-transparency data outside PhishScope?',
+				'Do you want to compare the visible brand cues with the current destination hostname instead of unavailable registrant data?',
+			],
+			highlight:
+				'The current case stores rendered page evidence, links, forms, and hostname context, but it does not include WHOIS, registrant, passive-DNS, or domain-history enrichment.',
+			reply:
+				`The requested WHOIS or registrant-correlation result for ${hostname} is not present in the current case evidence. PhishScope has the rendered page, extracted forms and links, and the observed hostname, but it does not have WHOIS records, registrant ownership history, passive DNS, or lists of sibling domains. Run WHOIS, passive-DNS, or certificate-transparency lookups separately if you need registrant attribution or related-domain clustering.`,
+			recommendedAction:
+				'Perform WHOIS, passive-DNS, registrant-correlation, or certificate-transparency lookups outside this case before making claims about registrant ownership or related domains.',
+		});
 	}
 
 	return normalizeFollowUpTurn({
@@ -1290,7 +1309,7 @@ function getRootDomain(hostname: string): string {
 	return parts.length <= 2 ? normalized : parts.slice(-2).join('.');
 }
 
-function isUnsupportedTelemetryQuestion(question: string): boolean {
+function getUnsupportedEvidenceGap(question: string): 'traffic' | 'registration' | null {
 	const lowered = question.toLowerCase();
 
 	const trafficPatterns = [
@@ -1320,7 +1339,33 @@ function isUnsupportedTelemetryQuestion(question: string): boolean {
 		/\bacquisition\b/,
 	];
 
-	return trafficPatterns.some((pattern) => pattern.test(lowered)) || analyticsPatterns.some((pattern) => pattern.test(lowered));
+	const registrationPatterns = [
+		/\bwhois\b/,
+		/\bregistrant\b/,
+		/\bregistered by\b/,
+		/\bregistration history\b/,
+		/\bdomain history\b/,
+		/\bpassive dns\b/,
+		/\bdns history\b/,
+		/\bother domains\b/,
+		/\brelated domains\b/,
+		/\bsibling domains\b/,
+		/\bsame owner\b/,
+		/\bsame registrant\b/,
+		/\breputation\b/,
+		/\bcertificate transparency\b/,
+		/\bct logs\b/,
+	];
+
+	if (trafficPatterns.some((pattern) => pattern.test(lowered)) || analyticsPatterns.some((pattern) => pattern.test(lowered))) {
+		return 'traffic';
+	}
+
+	if (registrationPatterns.some((pattern) => pattern.test(lowered))) {
+		return 'registration';
+	}
+
+	return null;
 }
 
 function hostMatchesVisibleBrand(hostname: string, brand: string): boolean {

@@ -186,6 +186,41 @@ describe('PhishScope worker', () => {
 		expect(followUp.payload.investigation.assessment.recommendedAction).toContain('analytics');
 	});
 
+	it('refuses to imply WHOIS or registrant-correlation data exists when it is not in evidence', async () => {
+		const env = createEnv();
+		const created = await createCase(env, {
+			url: 'https://apple3.com',
+		});
+
+		const whois = await requestJson(env, `http://example.com/api/cases/${created.payload.caseId}/messages`, {
+			body: JSON.stringify({
+				message: 'What is the result of the WHOIS lookup for the apple3.com domain?',
+			}),
+			headers: { 'content-type': 'application/json' },
+			method: 'POST',
+		});
+		const whoisReply = whois.payload.investigation.messages.at(-1).content as string;
+
+		expect(whois.response.ok).toBe(true);
+		expect(whoisReply).toContain('not present in the current case evidence');
+		expect(whoisReply).toContain('WHOIS');
+		expect(whois.payload.investigation.assessment.recommendedAction).toContain('WHOIS');
+
+		const relatedDomains = await requestJson(env, `http://example.com/api/cases/${created.payload.caseId}/messages`, {
+			body: JSON.stringify({
+				message: 'Are there any other domains registered by the same registrant that may be related to phishing activities?',
+			}),
+			headers: { 'content-type': 'application/json' },
+			method: 'POST',
+		});
+		const relatedDomainsReply = relatedDomains.payload.investigation.messages.at(-1).content as string;
+
+		expect(relatedDomains.response.ok).toBe(true);
+		expect(relatedDomainsReply).toContain('registrant-correlation');
+		expect(relatedDomainsReply).toContain('passive-DNS');
+		expect(relatedDomainsReply).not.toContain('may be related');
+	});
+
 	it('rejects create-case requests when the create limiter blocks the caller', async () => {
 		const env = createEnv({
 			CREATE_LIMITER: {
