@@ -1,13 +1,16 @@
 # cf_ai_phishscope
 
-PhishScope is an original AI-powered phishing investigation workstation built on Cloudflare. It captures suspicious pages with Browser Rendering, scores them with Workers AI, attaches optional RadarOps context, drafts mitigation actions, and stores each investigation in a Durable Object so the analyst can keep asking follow-up questions inside the same case.
+Live application: [https://cf-ai-phishscope.pranav20032021p.workers.dev](https://cf-ai-phishscope.pranav20032021p.workers.dev)
 
-## Why this fits the assignment
+PhishScope is a Cloudflare-native phishing investigation workstation. It captures suspicious pages with Browser Rendering, produces structured verdicts and analyst guidance, attaches optional RadarOps context, drafts mitigation actions, and preserves each case as a stateful investigation rather than a one-off scan.
 
-- `LLM`: Cloudflare Workers AI with `@cf/meta/llama-3.3-70b-instruct-fp8-fast`
-- `Workflow / coordination`: a Durable Object coordinates each investigation case
-- `User input`: URL submission, analyst chat, and optional browser voice input
-- `Memory / state`: each case persists rendered evidence, verdicts, notes, and chat history
+## Platform highlights
+
+- browser-rendered evidence capture instead of text-only URL analysis
+- persistent case memory with follow-up investigation thread
+- score decomposition so risk is explainable, not opaque
+- optional RadarOps enrichment for broader Internet context
+- mitigation drafting with scoped WAF, rate-limit, and rollback guidance
 
 ## Product concept
 
@@ -150,12 +153,12 @@ npm run deploy
 
 The Worker serves the UI and API from one deployment.
 
-## Submission notes
+## Repository notes
 
 - The repository name starts with `cf_ai_`, which satisfies the naming requirement.
 - `README.md` is included with local and live run instructions.
 - `PROMPTS.md` is included with the AI prompts used during development.
 
-## Originality note
+## Development note
 
 The product concept, UI, case model, capture flow, and investigation workflow in this repo are original work created for this assignment. The only starter material was the initial official Cloudflare Worker scaffold before the project was fully rewritten into PhishScope.
